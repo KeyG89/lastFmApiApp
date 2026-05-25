@@ -22,12 +22,6 @@ else
   echo ".env: absent (ok if no local secrets are needed)"
 fi
 
-if [ -n "${LASTFM_API_KEY:-}" ]; then
-  echo "LASTFM_API_KEY: present"
-else
-  echo "LASTFM_API_KEY: absent"
-fi
-
 if [ -f Diagnostics/project_doctor.py ]; then
   "$PYTHON_BIN" Diagnostics/project_doctor.py .
 fi

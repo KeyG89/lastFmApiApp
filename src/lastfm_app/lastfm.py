@@ -48,6 +48,9 @@ class LastfmClient:
                 if isinstance(payload, dict) and "error" in payload:
                     raise LastfmError(f"Last.fm API error {payload.get('error')}: {payload.get('message')}")
                 return payload
+            except urllib.error.HTTPError as error:
+                last_error = LastfmError(_http_error_message(error))
+                break
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, LastfmError) as error:
                 last_error = error
                 if isinstance(error, LastfmError):
@@ -58,3 +61,14 @@ class LastfmClient:
 
 def params_hash(params: dict[str, Any]) -> str:
     return hashlib.sha256(dumps(params).encode("utf-8")).hexdigest()
+
+
+def _http_error_message(error: urllib.error.HTTPError) -> str:
+    body = error.read().decode("utf-8", errors="replace")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return f"HTTP {error.code}: {body[:300] or error.reason}"
+    if isinstance(payload, dict) and "message" in payload:
+        return f"HTTP {error.code}: Last.fm API error {payload.get('error')}: {payload.get('message')}"
+    return f"HTTP {error.code}: {body[:300] or error.reason}"

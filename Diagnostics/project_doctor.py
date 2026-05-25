@@ -28,6 +28,8 @@ def has_secret_pattern(path: Path) -> bool:
     ignored_parts = {"__pycache__", ".venv", "venv", ".pytest_cache", "data"}
     if any(part in ignored_parts for part in path.parts):
         return False
+    if path.name == ".env":
+        return False
     if "Tests" in path.parts:
         return False
     if path.name in {".env", "credentials.json", "token.json"}:
