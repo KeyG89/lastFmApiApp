@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Last.fm API App Project Site</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="hero">
+    <nav class="nav">
+      <strong>Last.fm API App</strong>
+      <a href="#overview">Overview</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tutorial">Tutorial</a>
+      <a href="#quality">Quality</a>
+      <a href="#improve">Improve</a>
+    </nav>
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">Project Site</p>
+        <h1>Last.fm API App</h1>
+        <p class="lede">Python CLI + SQLite app that safely imports a user's full Last.fm listening history, enriches artists/tracks with Last.fm metadata and tags, and prepares reports for future playlist and discovery features.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#tutorial">Start tutorial</a>
+          <a class="button secondary" href="#architecture">View architecture</a>
+        </div>
+      </div>
+      <aside class="status-panel" aria-label="Project status">
+        <span class="badge">python</span>
+        <dl>
+          <div><dt>Plan</dt><dd>MasterPlan.md</dd></div>
+          <div><dt>Work</dt><dd>Items/</dd></div>
+          <div><dt>Health</dt><dd>Diagnostics/check.sh</dd></div>
+        </dl>
+      </aside>
+    </div>
+  </header>
+
+  <main>
+    <section class="band intro" id="overview">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">What it does</p>
+          <h2>A local music memory built from Last.fm scrobbles</h2>
+        </div>
+        <p>The alpha imports listening history into SQLite, enriches artists and tracks with Last.fm tags, and prints early playlist intelligence reports.</p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature plan"><span>01</span><h3>Full-history import</h3><p><code>user.getRecentTracks</code> pages are stored locally and deduplicated by track and timestamp.</p></article>
+        <article class="feature build"><span>02</span><h3>Music metadata</h3><p>Artists, tracks, albums, tags, and aggregate play counts are normalized in SQLite.</p></article>
+        <article class="feature ship"><span>03</span><h3>Reports first</h3><p>Favorites and genre profiles provide the first layer for future playlist generation.</p></article>
+        <article class="feature improve"><span>04</span><h3>Discovery-ready</h3><p>Spotify matching and external recommendation sources can build on the local database.</p></article>
+      </div>
+    </section>
+
+    <section class="band architecture" id="architecture">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Architecture</p>
+          <h2>Understand the project surface</h2>
+        </div>
+      </div>
+      <div class="architecture-map">
+        <article><strong>CLI</strong><span><code>src/lastfm_app/cli.py</code></span><p>Commands for database setup, imports, enrichment, status, and reports.</p></article>
+        <article><strong>Importer</strong><span><code>src/lastfm_app/importer.py</code></span><p>Pagination, scrobble parsing, local API cache usage, and metadata enrichment.</p></article>
+        <article><strong>Database</strong><span><code>src/lastfm_app/db.py</code></span><p>SQLite schema, upserts, tag normalization, and aggregate listening stats.</p></article>
+        <article><strong>Quality</strong><span><code>Diagnostics/</code> + <code>Tests/</code></span><p>Readiness checks, project doctor, Last.fm doctor, and pytest coverage.</p></article>
+      </div>
+    </section>
+
+    <section class="band tutorial" id="tutorial">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Tutorial path</p>
+          <h2>Run the alpha in three moves</h2>
+        </div>
+      </div>
+      <div class="tutorial-grid">
+        <div class="command-card"><h3>1. Install</h3><pre><code>python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+cp .env.example .env</code></pre></div>
+        <div class="command-card"><h3>2. Import</h3><pre><code>.venv/bin/lastfm-app init-db
+.venv/bin/lastfm-app import-history --max-pages 1
+.venv/bin/lastfm-app import-history --full</code></pre></div>
+        <div class="command-card"><h3>3. Explore</h3><pre><code>.venv/bin/lastfm-app enrich --artists --limit 100
+.venv/bin/lastfm-app report favorites
+bash Diagnostics/check.sh</code></pre></div>
+      </div>
+    </section>
+
+    <section class="band split" id="quality">
+      <div>
+        <p class="eyebrow">Quality model</p>
+        <h2>Every item closes with proof</h2>
+        <ol class="timeline">
+          <li><strong>Concept</strong><span>Capture implementation intent in the item file before building.</span></li>
+          <li><strong>Diagnostics</strong><span>Run project-specific checks and the structural doctor.</span></li>
+          <li><strong>Tutorial</strong><span>Update this site whenever commands, architecture, or workflow changes.</span></li>
+          <li><strong>Commit</strong><span>Use item prefixes such as <code>[T.1]</code> or <code>[T.2.1]</code>.</span></li>
+        </ol>
+      </div>
+      <div class="scorecard">
+        <h3>Health signals</h3>
+        <div><span>Structure</span><strong>Plan / Items / Docs</strong></div>
+        <div><span>Automation</span><strong>CI + diagnostics</strong></div>
+        <div><span>Safety</span><strong>Secret checks + env examples</strong></div>
+        <div><span>UX</span><strong>Business-grade tutorial</strong></div>
+      </div>
+    </section>
+
+    <section class="band improve" id="improve">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Auto-improvement</p>
+          <h2>Make future projects better</h2>
+        </div>
+        <p>When the user identifies a better template, diagnostic, tutorial pattern, GitHub behavior, or agent instruction, record it and propose it back to <code>project-builder-flow</code>.</p>
+      </div>
+      <div class="metric-row">
+        <div><strong>Capture</strong><span>Record the idea under <code>Workflow Improvements</code>.</span></div>
+        <div><strong>Implement</strong><span>Update the workflow source repo through a PR.</span></div>
+        <div><strong>Validate</strong><span>Run diagnostics, doctor, smoke tests, and skill validation.</span></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
