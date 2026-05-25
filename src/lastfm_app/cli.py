@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
     import_parser.add_argument("--full", action="store_true", help="Confirm full history import.")
     import_parser.add_argument("--max-pages", type=int, help="Limit pages for smoke tests.")
+    import_parser.add_argument("--start-page", type=int, default=1, help="Resume import from a specific Last.fm page.")
 
     enrich = sub.add_parser("enrich", help="Fetch Last.fm artist/track metadata and tags.")
     enrich.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
@@ -62,7 +63,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "import-history":
         if not args.full and not args.max_pages:
             parser.error("import-history requires --full or --max-pages")
-        pages, inserted = import_full_history(conn, client, config.username, max_pages=args.max_pages)
+        pages, inserted = import_full_history(
+            conn,
+            client,
+            config.username,
+            max_pages=args.max_pages,
+            start_page=args.start_page,
+        )
         print(f"import complete: pages={pages}, inserted={inserted}")
         return 0
 

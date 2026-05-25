@@ -75,9 +75,10 @@ def iter_recent_tracks(
     username: str,
     limit: int = 200,
     max_pages: int | None = None,
+    start_page: int = 1,
 ) -> Iterator[tuple[int, int, list[dict[str, Any]]]]:
-    page = 1
-    total_pages = 1
+    page = max(1, start_page)
+    total_pages = page
     while page <= total_pages:
         payload = get_cached_or_call(
             conn,
@@ -132,6 +133,7 @@ def import_full_history(
     client: LastfmClient,
     username: str,
     max_pages: int | None = None,
+    start_page: int = 1,
 ) -> tuple[int, int]:
     run = conn.execute(
         "INSERT INTO import_runs(command, status) VALUES('import-history', 'running')"
@@ -140,7 +142,13 @@ def import_full_history(
     pages = 0
     inserted = 0
     try:
-        for page, total_pages, tracks in iter_recent_tracks(conn, client, username, max_pages=max_pages):
+        for page, total_pages, tracks in iter_recent_tracks(
+            conn,
+            client,
+            username,
+            max_pages=max_pages,
+            start_page=start_page,
+        ):
             for track in tracks:
                 if import_track_scrobble(conn, track):
                     inserted += 1
