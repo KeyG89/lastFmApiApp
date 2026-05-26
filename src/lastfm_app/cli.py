@@ -7,7 +7,9 @@ from .config import LastfmConfig, load_config
 from .db import connect, init_db
 from .importer import enrich_artists, enrich_tracks, import_full_history
 from .lastfm import LastfmClient
+from .playlist_presets import PRESETS, PlaylistPreset, PlaylistTrack, parse_track_lines
 from .reports import favorites, genres, status
+from .spotify import SpotifyClient, authenticate, load_spotify_config, save_spotify_matches
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,6 +39,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = sub.add_parser("status", help="Print database status.")
     status_parser.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
+
+    spotify = sub.add_parser("spotify", help="Authenticate with Spotify and create playlists.")
+    spotify_sub = spotify.add_subparsers(dest="spotify_command", required=True)
+    spotify_auth = spotify_sub.add_parser("auth", help="Authorize Spotify playlist access with PKCE.")
+    spotify_auth.add_argument("--no-browser", action="store_true", help="Print the auth URL without opening a browser.")
+
+    spotify_presets = spotify_sub.add_parser("presets", help="List built-in playlist presets.")
+    spotify_presets.add_argument("--verbose", action="store_true", help="Print tracks in each preset.")
+
+    spotify_create = spotify_sub.add_parser("create", help="Create a Spotify playlist from a preset or text file.")
+    spotify_create.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
+    spotify_create.add_argument("--preset", choices=sorted(PRESETS), help="Built-in playlist preset.")
+    spotify_create.add_argument("--input", type=Path, help="Text file with one 'Artist - Track' per line.")
+    spotify_create.add_argument("--name", help="Playlist name override.")
+    spotify_create.add_argument("--description", default="", help="Playlist description override.")
+    spotify_create.add_argument("--public", action="store_true", help="Create a public playlist instead of private.")
+    spotify_create.add_argument("--dry-run", action="store_true", help="Match tracks but do not create a playlist.")
     return parser
 
 
@@ -93,8 +112,68 @@ def main(argv: list[str] | None = None) -> int:
         print(status(conn))
         return 0
 
+    if args.command == "spotify":
+        if args.spotify_command == "auth":
+            try:
+                spotify_config = load_spotify_config(require_client=True)
+            except ValueError as error:
+                parser.error(str(error))
+            token = authenticate(spotify_config, open_browser=not args.no_browser)
+            print(f"spotify auth ok: scopes={token.get('scope', '')}")
+            return 0
+
+        if args.spotify_command == "presets":
+            for key, preset in PRESETS.items():
+                print(f"{key}: {preset.name} ({len(preset.tracks)} tracks)")
+                if args.verbose:
+                    for track in preset.tracks:
+                        print(f"  - {track.artist} - {track.track}")
+            return 0
+
+        if args.spotify_command == "create":
+            tracks, default_name, default_description = _spotify_playlist_input(args)
+            if not tracks:
+                parser.error("spotify create needs --preset or --input")
+            try:
+                spotify_config = load_spotify_config(require_client=True)
+            except ValueError as error:
+                parser.error(str(error))
+            spotify_client = SpotifyClient(spotify_config)
+            matches: list[tuple[PlaylistTrack, dict | None]] = []
+            for wanted in tracks:
+                match = spotify_client.search_track(wanted)
+                matches.append((wanted, match))
+                if match:
+                    artists = ", ".join(artist.get("name", "") for artist in match.get("artists", []))
+                    print(f"matched: {wanted.artist} - {wanted.track} -> {artists} - {match.get('name')} [{match.get('uri')}]")
+                else:
+                    print(f"missing: {wanted.artist} - {wanted.track}")
+            save_spotify_matches(conn, matches)
+            uris = [match["uri"] for _, match in matches if match and match.get("uri")]
+            if args.dry_run:
+                print(f"dry run: matched {len(uris)}/{len(tracks)} tracks")
+                return 0
+            if not uris:
+                raise SystemExit("No Spotify tracks matched; playlist was not created.")
+            name = args.name or default_name
+            description = args.description or default_description
+            playlist = spotify_client.create_playlist(name, description, public=args.public)
+            spotify_client.add_items(playlist["id"], uris)
+            print(f"spotify playlist created: {playlist.get('external_urls', {}).get('spotify', playlist.get('id'))}")
+            print(f"added {len(uris)}/{len(tracks)} tracks")
+            return 0
+
     parser.error("unknown command")
     return 2
+
+
+def _spotify_playlist_input(args: argparse.Namespace) -> tuple[list[PlaylistTrack], str, str]:
+    if args.preset:
+        preset: PlaylistPreset = PRESETS[args.preset]
+        return list(preset.tracks), preset.name, preset.description
+    if args.input:
+        return parse_track_lines(args.input.read_text(encoding="utf-8")), args.name or args.input.stem, args.description
+    return [], args.name or "Last.fm Playlist", args.description
 
 
 if __name__ == "__main__":

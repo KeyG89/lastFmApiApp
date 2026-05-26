@@ -29,6 +29,48 @@ For a safe smoke import:
 lastfm-app import-history --max-pages 1
 ```
 
+## Spotify Export
+
+Create a Spotify developer app, add this redirect URI, and put the app's client ID in `.env`:
+
+```text
+http://127.0.0.1:8765/callback
+```
+
+The local Spotify settings are:
+
+```bash
+SPOTIFY_CLIENT_ID=
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:8765/callback
+SPOTIFY_TOKEN_PATH=data/spotify_token.json
+SPOTIFY_MARKET=PL
+```
+
+Authorize once:
+
+```bash
+.venv/bin/lastfm-app spotify auth
+```
+
+List built-in presets and dry-run matching:
+
+```bash
+.venv/bin/lastfm-app spotify presets --verbose
+.venv/bin/lastfm-app spotify create --preset morning-rock-bangers --dry-run
+```
+
+Create a private playlist:
+
+```bash
+.venv/bin/lastfm-app spotify create --preset morning-rock-bangers
+```
+
+You can also create from a text file with one `Artist - Track` per line:
+
+```bash
+.venv/bin/lastfm-app spotify create --input my-playlist.txt --name "My Last.fm Playlist"
+```
+
 ## Stack
 
 Python 3.11+, stdlib HTTP client, SQLite, pytest. The app uses the official Last.fm API rather than HTML scraping.
