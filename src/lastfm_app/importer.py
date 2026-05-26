@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import db
-from .lastfm import LastfmClient, params_hash
+from .lastfm import LastfmClient, LastfmError, params_hash
 
 
 def text_value(value: Any) -> str | None:
@@ -196,7 +196,11 @@ def enrich_artists(conn: sqlite3.Connection, client: LastfmClient, username: str
     ).fetchall()
     count = 0
     for row in rows:
-        info = get_cached_or_call(conn, client, "artist.getInfo", {"artist": row["name"], "username": username})
+        try:
+            info = get_cached_or_call(conn, client, "artist.getInfo", {"artist": row["name"], "username": username})
+        except LastfmError as error:
+            print(f"skipping artist {row['name']!r}: {error}")
+            continue
         artist = info.get("artist", {})
         stats = artist.get("stats", {}) if isinstance(artist, dict) else {}
         conn.execute(
@@ -221,7 +225,13 @@ def enrich_artists(conn: sqlite3.Connection, client: LastfmClient, username: str
                 row["id"],
             ),
         )
-        tags_payload = get_cached_or_call(conn, client, "artist.getTopTags", {"artist": row["name"]})
+        try:
+            tags_payload = get_cached_or_call(conn, client, "artist.getTopTags", {"artist": row["name"]})
+        except LastfmError as error:
+            print(f"skipping artist tags {row['name']!r}: {error}")
+            conn.commit()
+            count += 1
+            continue
         for tag_id, weight in db.upsert_tags(conn, tag_pairs(tags_payload)):
             conn.execute(
                 "INSERT OR REPLACE INTO artist_tags(artist_id, tag_id, weight, source) VALUES(?, ?, ?, 'lastfm')",
@@ -245,12 +255,16 @@ def enrich_tracks(conn: sqlite3.Connection, client: LastfmClient, username: str,
     ).fetchall()
     count = 0
     for row in rows:
-        info = get_cached_or_call(
-            conn,
-            client,
-            "track.getInfo",
-            {"artist": row["artist_name"], "track": row["name"], "username": username},
-        )
+        try:
+            info = get_cached_or_call(
+                conn,
+                client,
+                "track.getInfo",
+                {"artist": row["artist_name"], "track": row["name"], "username": username},
+            )
+        except LastfmError as error:
+            print(f"skipping track {row['artist_name']!r} - {row['name']!r}: {error}")
+            continue
         track = info.get("track", {})
         conn.execute(
             """
@@ -272,12 +286,18 @@ def enrich_tracks(conn: sqlite3.Connection, client: LastfmClient, username: str,
                 row["id"],
             ),
         )
-        tags_payload = get_cached_or_call(
-            conn,
-            client,
-            "track.getTopTags",
-            {"artist": row["artist_name"], "track": row["name"]},
-        )
+        try:
+            tags_payload = get_cached_or_call(
+                conn,
+                client,
+                "track.getTopTags",
+                {"artist": row["artist_name"], "track": row["name"]},
+            )
+        except LastfmError as error:
+            print(f"skipping track tags {row['artist_name']!r} - {row['name']!r}: {error}")
+            conn.commit()
+            count += 1
+            continue
         for tag_id, weight in db.upsert_tags(conn, tag_pairs(tags_payload)):
             conn.execute(
                 "INSERT OR REPLACE INTO track_tags(track_id, tag_id, weight, source) VALUES(?, ?, ?, 'lastfm')",

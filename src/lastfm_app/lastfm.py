@@ -51,7 +51,7 @@ class LastfmClient:
             except urllib.error.HTTPError as error:
                 last_error = LastfmError(_http_error_message(error))
                 break
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, LastfmError) as error:
+            except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, LastfmError) as error:
                 last_error = error
                 if isinstance(error, LastfmError):
                     break
