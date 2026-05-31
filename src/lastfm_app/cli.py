@@ -10,10 +10,14 @@ from .lastfm import LastfmClient
 from .playlist_presets import PRESETS, PlaylistPreset, PlaylistTrack, parse_track_lines
 from .reports import favorites, genres, status
 from .shazam import (
+    ShazamApiClient,
+    ShazamApiError,
     connect_shazam,
     ensure_shazam_schema,
     generate_shazam_playlists,
+    import_shazam_api_search,
     import_shazam_file,
+    import_spotify_shazam_playlist,
     link_lastfm_tracks,
     load_shazam_config,
     match_spotify_tracks,
@@ -112,6 +116,20 @@ def build_parser() -> argparse.ArgumentParser:
     shazam_import = shazam_sub.add_parser("import", help="Import Shazam CSV or JSON export into the local Shazam database.")
     shazam_import.add_argument("path", type=Path)
     shazam_import.add_argument("--link-lastfm", action="store_true", help="Link imported tracks to the Last.fm database after import.")
+
+    shazam_api_check = shazam_sub.add_parser("api-check", help="Check Shazam API configuration.")
+    shazam_api_check.set_defaults(_shazam_parser=True)
+
+    shazam_api_search = shazam_sub.add_parser("api-search", help="Search Shazam API and import returned tracks.")
+    shazam_api_search.add_argument("query", help="Search query, for example 'The Hives Try It Again'.")
+    shazam_api_search.add_argument("--limit", type=int, default=5)
+
+    shazam_spotify_import = shazam_sub.add_parser(
+        "import-spotify-playlist",
+        help="Import a Spotify playlist such as 'My Shazam Tracks' into the Shazam database through Spotify API.",
+    )
+    shazam_spotify_import.add_argument("playlist_id")
+    shazam_spotify_import.add_argument("--link-lastfm", action="store_true", help="Link imported tracks to the Last.fm database after import.")
 
     shazam_link = shazam_sub.add_parser("link-lastfm", help="Link Shazam tracks to matching Last.fm tracks.")
     shazam_link.set_defaults(_shazam_parser=True)
@@ -350,6 +368,43 @@ def main(argv: list[str] | None = None) -> int:
                 linked = link_lastfm_tracks(shazam_conn, conn)
             print(
                 "shazam import complete: "
+                f"seen={result['rows_seen']}, inserted={result['rows_inserted']}, "
+                f"updated={result['rows_updated']}, lastfm_linked={linked}"
+            )
+            return 0
+
+        if args.shazam_command == "api-check":
+            shazam_config = load_shazam_config()
+            try:
+                ShazamApiClient(shazam_config)
+            except ShazamApiError as error:
+                raise SystemExit(f"shazam api not configured: {error}")
+            print(f"shazam api configured: host={shazam_config.rapidapi_host}, locale={shazam_config.locale}")
+            return 0
+
+        if args.shazam_command == "api-search":
+            try:
+                api_client = ShazamApiClient(load_shazam_config())
+                result = import_shazam_api_search(shazam_conn, api_client, args.query, limit=args.limit)
+            except ShazamApiError as error:
+                raise SystemExit(f"shazam api search failed: {error}")
+            print(
+                "shazam api search import complete: "
+                f"seen={result['rows_seen']}, inserted={result['rows_inserted']}, updated={result['rows_updated']}"
+            )
+            return 0
+
+        if args.shazam_command == "import-spotify-playlist":
+            spotify_client = _spotify_client_or_error(parser)
+            try:
+                result = import_spotify_shazam_playlist(shazam_conn, spotify_client, args.playlist_id)
+            except SpotifyRateLimitError as error:
+                raise SystemExit(f"shazam spotify playlist import rate limited: {error}")
+            linked = 0
+            if args.link_lastfm:
+                linked = link_lastfm_tracks(shazam_conn, conn)
+            print(
+                "shazam spotify playlist import complete: "
                 f"seen={result['rows_seen']}, inserted={result['rows_inserted']}, "
                 f"updated={result['rows_updated']}, lastfm_linked={linked}"
             )

@@ -5,6 +5,8 @@ from lastfm_app.shazam import (
     connect_shazam,
     ensure_shazam_schema,
     generate_shazam_playlists,
+    import_shazam_api_search,
+    import_spotify_shazam_playlist,
     import_shazam_file,
     link_lastfm_tracks,
     playlist_report,
@@ -62,3 +64,63 @@ def test_shazam_status_empty_database(tmp_path) -> None:
     conn = connect_shazam(tmp_path / "shazam.sqlite3")
     ensure_shazam_schema(conn)
     assert "- tracks: 0" in shazam_status(conn)
+
+
+def test_import_shazam_api_search(tmp_path) -> None:
+    class FakeShazamApi:
+        def search(self, query: str, limit: int = 5):
+            assert query == "known track"
+            assert limit == 2
+            return [
+                {
+                    "title": "Known Track",
+                    "subtitle": "Known Artist",
+                    "url": "https://www.shazam.com/track/123/known-track",
+                    "genres": {"primary": "Electronic"},
+                    "hub": {"actions": [{"uri": "https://music.apple.com/album/known-track/123"}]},
+                }
+            ]
+
+    conn = connect_shazam(tmp_path / "shazam.sqlite3")
+    result = import_shazam_api_search(conn, FakeShazamApi(), "known track", limit=2)
+
+    assert result == {"rows_seen": 1, "rows_inserted": 1, "rows_updated": 0}
+    row = conn.execute("SELECT artist_name, track_name, genre, shazam_url, apple_music_url FROM shazam_tracks").fetchone()
+    assert dict(row) == {
+        "artist_name": "Known Artist",
+        "track_name": "Known Track",
+        "genre": "Electronic",
+        "shazam_url": "https://www.shazam.com/track/123/known-track",
+        "apple_music_url": "https://music.apple.com/album/known-track/123",
+    }
+
+
+def test_import_spotify_shazam_playlist(tmp_path) -> None:
+    class FakeSpotify:
+        def playlist_tracks(self, playlist_id: str):
+            assert playlist_id == "playlist1"
+            return [
+                {
+                    "added_at": "2026-05-31T10:00:00Z",
+                    "track": {
+                        "id": "spotify1",
+                        "uri": "spotify:track:spotify1",
+                        "name": "Playlist Track",
+                        "popularity": 72,
+                        "external_urls": {"spotify": "https://open.spotify.com/track/spotify1"},
+                        "artists": [{"name": "Playlist Artist"}],
+                        "album": {"name": "Playlist Album", "album_type": "single"},
+                    },
+                }
+            ]
+
+    conn = connect_shazam(tmp_path / "shazam.sqlite3")
+    result = import_spotify_shazam_playlist(conn, FakeSpotify(), "playlist1")
+
+    assert result == {"rows_seen": 1, "rows_inserted": 1, "rows_updated": 0}
+    row = conn.execute("SELECT spotify_track_id, spotify_uri, spotify_popularity FROM shazam_tracks").fetchone()
+    assert dict(row) == {
+        "spotify_track_id": "spotify1",
+        "spotify_uri": "spotify:track:spotify1",
+        "spotify_popularity": 72,
+    }
