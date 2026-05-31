@@ -76,11 +76,33 @@ You can also create from a text file with one `Artist - Track` per line:
 Mirror Spotify playlists into SQLite:
 
 ```bash
-.venv/bin/lastfm-app spotify sync
+.venv/bin/lastfm-app spotify sync --limit 10 --delay 3
 .venv/bin/lastfm-app spotify playlists
 ```
 
 Safety rule: playlists created by this app on or after `2026-05-31` are editable by the app. Synced playlists with unknown creation dates are treated as protected. Rename/unfollow/delete-style operations on protected playlists require an exact `--confirm` phrase printed by the CLI.
+
+## Shazam Library
+
+Shazam data is stored in a separate local SQLite database, `data/shazam.sqlite3` by default. The first supported source is CSV/JSON export import. Spotify matching is the API-backed enrichment route for stable Spotify IDs, URLs, album metadata, and popularity.
+
+```bash
+.venv/bin/lastfm-app shazam init
+.venv/bin/lastfm-app shazam import path/to/shazam.csv --link-lastfm
+.venv/bin/lastfm-app shazam status
+```
+
+Generate local playlist plans from all imported Shazams:
+
+```bash
+.venv/bin/lastfm-app shazam playlists --show
+```
+
+The all-track playlist is sorted from calmest to most energetic. Genre playlists are generated to cover the whole imported Shazam library. When the Spotify rate-limit window is clear, match imported Shazam tracks through Spotify:
+
+```bash
+.venv/bin/lastfm-app shazam match-spotify --limit 25
+```
 
 ## Stack
 

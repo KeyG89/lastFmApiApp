@@ -13,6 +13,7 @@
       <a href="#overview">Overview</a>
       <a href="#architecture">Architecture</a>
       <a href="#tutorial">Tutorial</a>
+      <a href="#shazam">Shazam</a>
       <a href="#quality">Quality</a>
       <a href="#improve">Improve</a>
     </nav>
@@ -20,7 +21,7 @@
       <div>
         <p class="eyebrow">Project Site</p>
         <h1>Last.fm API App</h1>
-        <p class="lede">Python CLI + SQLite app that safely imports a user's full Last.fm listening history, enriches artists/tracks with Last.fm metadata and tags, and prepares reports for future playlist and discovery features.</p>
+        <p class="lede">Python CLI + SQLite app that imports Last.fm listening history, mirrors Spotify safely, and turns Shazam discoveries into local playlist plans.</p>
         <div class="hero-actions">
           <a class="button primary" href="#tutorial">Start tutorial</a>
           <a class="button secondary" href="#architecture">View architecture</a>
@@ -50,7 +51,7 @@
         <article class="feature plan"><span>01</span><h3>Full-history import</h3><p><code>user.getRecentTracks</code> pages are stored locally and deduplicated by track and timestamp.</p></article>
         <article class="feature build"><span>02</span><h3>Music metadata</h3><p>Artists, tracks, albums, tags, and aggregate play counts are normalized in SQLite.</p></article>
         <article class="feature ship"><span>03</span><h3>Reports first</h3><p>Favorites and genre profiles provide the first layer for future playlist generation.</p></article>
-        <article class="feature improve"><span>04</span><h3>Discovery-ready</h3><p>Spotify matching and external recommendation sources can build on the local database.</p></article>
+        <article class="feature improve"><span>04</span><h3>Discovery-ready</h3><p>Spotify and Shazam data can now be linked back to the local music memory.</p></article>
       </div>
     </section>
 
@@ -62,9 +63,9 @@
         </div>
       </div>
       <div class="architecture-map">
-        <article><strong>CLI</strong><span><code>src/lastfm_app/cli.py</code></span><p>Commands for database setup, imports, enrichment, status, and reports.</p></article>
+        <article><strong>CLI</strong><span><code>src/lastfm_app/cli.py</code></span><p>Commands for Last.fm, Spotify, Shazam, status, reports, and playlist workflows.</p></article>
         <article><strong>Importer</strong><span><code>src/lastfm_app/importer.py</code></span><p>Pagination, scrobble parsing, local API cache usage, and metadata enrichment.</p></article>
-        <article><strong>Database</strong><span><code>src/lastfm_app/db.py</code></span><p>SQLite schema, upserts, tag normalization, and aggregate listening stats.</p></article>
+        <article><strong>Databases</strong><span><code>data/lastfm.sqlite3</code> + <code>data/shazam.sqlite3</code></span><p>Listening history, Spotify mirror tables, and Shazam discovery inbox stay queryable locally.</p></article>
         <article><strong>Quality</strong><span><code>Diagnostics/</code> + <code>Tests/</code></span><p>Readiness checks, project doctor, Last.fm doctor, and pytest coverage.</p></article>
       </div>
     </section>
@@ -86,6 +87,24 @@ cp .env.example .env</code></pre></div>
         <div class="command-card"><h3>3. Explore</h3><pre><code>.venv/bin/lastfm-app enrich --artists --limit 100
 .venv/bin/lastfm-app report favorites
 bash Diagnostics/check.sh</code></pre></div>
+      </div>
+    </section>
+
+    <section class="band tutorial" id="shazam">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Shazam path</p>
+          <h2>Import discoveries and generate local playlists</h2>
+        </div>
+        <p>Shazam imports land in a separate SQLite database, then playlist plans are generated from calm to energetic and by genre coverage.</p>
+      </div>
+      <div class="tutorial-grid">
+        <div class="command-card"><h3>1. Initialize</h3><pre><code>.venv/bin/lastfm-app shazam init
+.venv/bin/lastfm-app shazam status</code></pre></div>
+        <div class="command-card"><h3>2. Import</h3><pre><code>.venv/bin/lastfm-app shazam import path/to/shazam.csv --link-lastfm
+.venv/bin/lastfm-app shazam match-spotify --limit 25</code></pre></div>
+        <div class="command-card"><h3>3. Playlists</h3><pre><code>.venv/bin/lastfm-app shazam playlists --show
+.venv/bin/lastfm-app shazam playlists --show --limit 20</code></pre></div>
       </div>
     </section>
 

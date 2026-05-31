@@ -9,6 +9,17 @@ from .importer import enrich_artists, enrich_tracks, import_full_history
 from .lastfm import LastfmClient
 from .playlist_presets import PRESETS, PlaylistPreset, PlaylistTrack, parse_track_lines
 from .reports import favorites, genres, status
+from .shazam import (
+    connect_shazam,
+    ensure_shazam_schema,
+    generate_shazam_playlists,
+    import_shazam_file,
+    link_lastfm_tracks,
+    load_shazam_config,
+    match_spotify_tracks,
+    playlist_report,
+    shazam_status,
+)
 from .spotify import (
     SpotifyError,
     SpotifyRateLimitError,
@@ -90,6 +101,30 @@ def build_parser() -> argparse.ArgumentParser:
     spotify_unfollow.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
     spotify_unfollow.add_argument("playlist_id")
     spotify_unfollow.add_argument("--confirm", help="Required exact confirmation phrase for protected playlists.")
+
+    shazam = sub.add_parser("shazam", help="Import and organize Shazam discoveries.")
+    shazam.add_argument("--shazam-db", type=Path, help="Override Shazam SQLite database path.")
+    shazam_sub = shazam.add_subparsers(dest="shazam_command", required=True)
+
+    shazam_init = shazam_sub.add_parser("init", help="Create or migrate the local Shazam database.")
+    shazam_init.set_defaults(_shazam_parser=True)
+
+    shazam_import = shazam_sub.add_parser("import", help="Import Shazam CSV or JSON export into the local Shazam database.")
+    shazam_import.add_argument("path", type=Path)
+    shazam_import.add_argument("--link-lastfm", action="store_true", help="Link imported tracks to the Last.fm database after import.")
+
+    shazam_link = shazam_sub.add_parser("link-lastfm", help="Link Shazam tracks to matching Last.fm tracks.")
+    shazam_link.set_defaults(_shazam_parser=True)
+
+    shazam_match = shazam_sub.add_parser("match-spotify", help="Match Shazam tracks to Spotify via the Spotify API.")
+    shazam_match.add_argument("--limit", type=int, help="Limit number of unmatched Shazam tracks checked.")
+
+    shazam_playlists = shazam_sub.add_parser("playlists", help="Generate Shazam calm-to-energetic and genre playlists.")
+    shazam_playlists.add_argument("--show", action="store_true", help="Print generated playlist contents.")
+    shazam_playlists.add_argument("--limit", type=int, help="Limit printed tracks per playlist when using --show.")
+
+    shazam_status_parser = shazam_sub.add_parser("status", help="Print Shazam database status.")
+    shazam_status_parser.set_defaults(_shazam_parser=True)
     return parser
 
 
@@ -297,6 +332,53 @@ def main(argv: list[str] | None = None) -> int:
                 confirmation=args.confirm,
             )
             print(f"unfollowed playlist {args.playlist_id}")
+            return 0
+
+    if args.command == "shazam":
+        shazam_db = args.shazam_db or load_shazam_config().db_path
+        shazam_conn = connect_shazam(shazam_db)
+
+        if args.shazam_command == "init":
+            ensure_shazam_schema(shazam_conn)
+            print(f"initialized Shazam database: {shazam_db}")
+            return 0
+
+        if args.shazam_command == "import":
+            result = import_shazam_file(shazam_conn, args.path)
+            linked = 0
+            if args.link_lastfm:
+                linked = link_lastfm_tracks(shazam_conn, conn)
+            print(
+                "shazam import complete: "
+                f"seen={result['rows_seen']}, inserted={result['rows_inserted']}, "
+                f"updated={result['rows_updated']}, lastfm_linked={linked}"
+            )
+            return 0
+
+        if args.shazam_command == "link-lastfm":
+            linked = link_lastfm_tracks(shazam_conn, conn)
+            print(f"shazam lastfm links added: {linked}")
+            return 0
+
+        if args.shazam_command == "match-spotify":
+            spotify_client = _spotify_client_or_error(parser)
+            try:
+                result = match_spotify_tracks(shazam_conn, spotify_client, limit=args.limit)
+            except SpotifyRateLimitError as error:
+                raise SystemExit(f"shazam spotify matching rate limited: {error}")
+            print(f"shazam spotify matching complete: checked={result['checked']}, matched={result['matched']}")
+            return 0
+
+        if args.shazam_command == "playlists":
+            result = generate_shazam_playlists(shazam_conn)
+            print(f"shazam playlists generated: playlists={result['playlists']}, items={result['items']}")
+            if args.show:
+                print()
+                print(playlist_report(shazam_conn, limit=args.limit))
+            return 0
+
+        if args.shazam_command == "status":
+            print(shazam_status(shazam_conn))
             return 0
 
     parser.error("unknown command")
