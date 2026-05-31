@@ -11,6 +11,7 @@ from .playlist_presets import PRESETS, PlaylistPreset, PlaylistTrack, parse_trac
 from .reports import favorites, genres, status
 from .spotify import (
     SpotifyError,
+    SpotifyRateLimitError,
     SpotifyClient,
     authenticate,
     ensure_spotify_schema,
@@ -19,7 +20,7 @@ from .spotify import (
     protected_confirmation_phrase,
     require_playlist_confirmation,
     save_spotify_matches,
-    sync_spotify_library,
+    sync_spotify_playlists,
     upsert_spotify_playlist,
 )
 
@@ -62,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     spotify_sync = spotify_sub.add_parser("sync", help="Mirror Spotify account playlists and tracks into SQLite.")
     spotify_sync.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
+    spotify_sync.add_argument("--playlist-id", action="append", help="Sync only this playlist id. Can be repeated.")
+    spotify_sync.add_argument("--limit", type=int, help="Limit number of playlists processed.")
+    spotify_sync.add_argument("--delay", type=float, default=1.0, help="Delay in seconds before fetching each owned playlist's items.")
 
     spotify_playlists = spotify_sub.add_parser("playlists", help="List synced Spotify playlists and protection status.")
     spotify_playlists.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
@@ -163,7 +167,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.spotify_command == "sync":
             spotify_client = _spotify_client_or_error(parser)
             try:
-                result = sync_spotify_library(conn, spotify_client)
+                result = sync_spotify_playlists(
+                    conn,
+                    spotify_client,
+                    playlist_ids=set(args.playlist_id or []) or None,
+                    limit=args.limit,
+                    delay_seconds=args.delay,
+                )
+            except SpotifyRateLimitError as error:
+                log_operation(
+                    conn,
+                    "sync_library",
+                    "spotify_account",
+                    "rate_limited",
+                    details={"retry_after_seconds": error.retry_after_seconds, "error": str(error)},
+                )
+                raise SystemExit(f"spotify sync rate limited: {error}")
             except SpotifyError as error:
                 log_operation(
                     conn,

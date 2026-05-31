@@ -4,6 +4,7 @@ import base64
 import hashlib
 import http.server
 import json
+import os
 import secrets
 import sqlite3
 import time
@@ -33,6 +34,23 @@ SPOTIFY_PROTECTION_CUTOFF = "2026-05-31"
 
 class SpotifyError(RuntimeError):
     pass
+
+
+class SpotifyRateLimitError(SpotifyError):
+    def __init__(self, retry_after_seconds: int, message: str | None = None):
+        self.retry_after_seconds = retry_after_seconds
+        retry_after = format_seconds(retry_after_seconds)
+        super().__init__(message or f"Spotify rate limited this token. Retry after about {retry_after}.")
+
+
+def format_seconds(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds} seconds"
+    minutes, rest = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes} minutes {rest} seconds"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} hours {minutes} minutes"
 
 
 @dataclass(frozen=True)
@@ -67,6 +85,14 @@ def _code_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
+def _max_rate_limit_sleep_seconds() -> int:
+    raw = os.environ.get("SPOTIFY_MAX_RATE_LIMIT_SLEEP_SECONDS", "15")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 15
+
+
 def _json_request(url: str, method: str = "GET", token: str | None = None, data: dict[str, Any] | None = None) -> dict[str, Any]:
     body = None
     headers = {"Accept": "application/json"}
@@ -89,6 +115,8 @@ def _json_request(url: str, method: str = "GET", token: str | None = None, data:
                     delay = max(1, int(retry_after))
                 except ValueError:
                     delay = 5
+                if delay > _max_rate_limit_sleep_seconds():
+                    raise SpotifyRateLimitError(delay) from error
                 time.sleep(delay)
                 continue
             raise SpotifyError(f"Spotify HTTP {error.code}: {raw[:500]}") from error
@@ -548,6 +576,16 @@ def require_playlist_confirmation(conn: sqlite3.Connection, operation: str, play
 
 
 def sync_spotify_library(conn: sqlite3.Connection, client: SpotifyClient) -> dict[str, int]:
+    return sync_spotify_playlists(conn, client)
+
+
+def sync_spotify_playlists(
+    conn: sqlite3.Connection,
+    client: SpotifyClient,
+    playlist_ids: set[str] | None = None,
+    limit: int | None = None,
+    delay_seconds: float = 0.25,
+) -> dict[str, int]:
     ensure_spotify_schema(conn)
     account = client.me()
     account_id = account["id"]
@@ -569,6 +607,10 @@ def sync_spotify_library(conn: sqlite3.Connection, client: SpotifyClient) -> dic
     playlist_count = 0
     track_count = 0
     for playlist in client.list_playlists():
+        if playlist_ids and playlist["id"] not in playlist_ids:
+            continue
+        if limit is not None and playlist_count >= limit:
+            break
         playlist_count += 1
         upsert_spotify_playlist(conn, account_id, playlist, created_by_app=False)
         owner_id = playlist.get("owner", {}).get("id")
@@ -584,9 +626,23 @@ def sync_spotify_library(conn: sqlite3.Connection, client: SpotifyClient) -> dic
                 details={"owner_id": owner_id},
             )
             continue
+        if delay_seconds:
+            time.sleep(delay_seconds)
         conn.execute("DELETE FROM spotify_playlist_tracks WHERE playlist_id = ?", (playlist["id"],))
         try:
             playlist_items = client.playlist_tracks(playlist["id"])
+        except SpotifyRateLimitError as error:
+            log_operation(
+                conn,
+                "sync_playlist_tracks",
+                "playlist",
+                "rate_limited",
+                target_id=playlist["id"],
+                target_name=playlist.get("name"),
+                protected_target=True,
+                details={"retry_after_seconds": error.retry_after_seconds},
+            )
+            raise
         except SpotifyError as error:
             log_operation(
                 conn,

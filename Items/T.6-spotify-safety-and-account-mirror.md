@@ -25,22 +25,27 @@ Use conservative local policy because Spotify playlist objects do not expose a r
 - Initial schema and operation backlog are implemented in `src/lastfm_app/spotify.py`.
 - CLI commands added: `spotify sync`, `spotify playlists`, `spotify rename`, and `spotify unfollow`.
 - Spotify scopes now include playlist read scopes and library/top/recent scopes for future features.
+- `spotify sync` supports `--playlist-id`, `--limit`, and `--delay` so the account mirror can be built in controlled batches.
+- Non-owned playlists are skipped before track fetches to avoid Spotify `403 Forbidden` responses.
+- Spotify `429` responses now fail fast when `Retry-After` is long and are logged as rate-limit events instead of silently sleeping.
 
 ## Validation
 
 - Unit tests cover protected playlist policy.
-- `spotify sync` currently returns `Insufficient client scope` until Spotify auth is re-run with the expanded scope set.
+- Unit tests cover long Spotify rate-limit handling.
+- Real Spotify auth now has the expanded scopes, but track sync is currently blocked by Spotify API rate limiting after repeated full-sync attempts.
 
 ## User Test Instructions
 
-1. Run `.venv/bin/lastfm-app spotify auth` again to grant expanded scopes.
-2. Run `.venv/bin/lastfm-app spotify sync`.
+1. After the Spotify rate-limit window clears, run `.venv/bin/lastfm-app spotify sync --playlist-id 7g57arQ36vxBFFnQXWBZqS --delay 2`.
+2. If that succeeds, run `.venv/bin/lastfm-app spotify sync --limit 10 --delay 3`.
 3. Run `.venv/bin/lastfm-app spotify playlists`.
 4. Try a protected rename without `--confirm`; it should be blocked and logged.
 
 ## Feedback And Fix History
 
-No feedback yet.
+- 2026-05-31: User hit `403 Forbidden` while syncing tracks; sync now skips non-owned playlists.
+- 2026-05-31: User hit Spotify `429 Too Many Requests`; sync now reports the retry window clearly and stops instead of appearing hung.
 
 ## Closure Notes
 
