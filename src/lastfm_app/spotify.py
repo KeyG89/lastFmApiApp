@@ -75,14 +75,24 @@ def _json_request(url: str, method: str = "GET", token: str | None = None, data:
         headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(url, data=body, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as error:
-        raw = error.read().decode("utf-8", errors="replace")
-        raise SpotifyError(f"Spotify HTTP {error.code}: {raw[:500]}") from error
+    for attempt in range(4):
+        request = urllib.request.Request(url, data=body, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                raw = response.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as error:
+            raw = error.read().decode("utf-8", errors="replace")
+            if error.code == 429 and attempt < 3:
+                retry_after = error.headers.get("Retry-After", "5")
+                try:
+                    delay = max(1, int(retry_after))
+                except ValueError:
+                    delay = 5
+                time.sleep(delay)
+                continue
+            raise SpotifyError(f"Spotify HTTP {error.code}: {raw[:500]}") from error
+    raise SpotifyError("Spotify request failed after retries")
 
 
 def _paged_get(url: str, token: str) -> list[dict[str, Any]]:
@@ -234,7 +244,10 @@ class SpotifyClient:
 
     def playlist_tracks(self, playlist_id: str) -> list[dict[str, Any]]:
         fields = "items(added_at,track(id,uri,name,duration_ms,explicit,popularity,external_urls,artists(id,uri,name),album(id,uri,name,release_date,album_type,artists(id,uri,name)))),next"
-        url = f"{API_ROOT}/playlists/{playlist_id}/tracks?{urllib.parse.urlencode({'limit': '50', 'fields': fields})}"
+        params = {"limit": "50", "fields": fields, "additional_types": "track"}
+        if self.config.market:
+            params["market"] = self.config.market
+        url = f"{API_ROOT}/playlists/{playlist_id}/items?{urllib.parse.urlencode(params)}"
         return _paged_get(url, self.access_token)
 
     def search_track(self, track: PlaylistTrack) -> dict[str, Any] | None:
@@ -558,8 +571,35 @@ def sync_spotify_library(conn: sqlite3.Connection, client: SpotifyClient) -> dic
     for playlist in client.list_playlists():
         playlist_count += 1
         upsert_spotify_playlist(conn, account_id, playlist, created_by_app=False)
+        owner_id = playlist.get("owner", {}).get("id")
+        if owner_id != account_id:
+            log_operation(
+                conn,
+                "sync_playlist_tracks",
+                "playlist",
+                "skipped_not_owner",
+                target_id=playlist["id"],
+                target_name=playlist.get("name"),
+                protected_target=True,
+                details={"owner_id": owner_id},
+            )
+            continue
         conn.execute("DELETE FROM spotify_playlist_tracks WHERE playlist_id = ?", (playlist["id"],))
-        for position, item in enumerate(client.playlist_tracks(playlist["id"])):
+        try:
+            playlist_items = client.playlist_tracks(playlist["id"])
+        except SpotifyError as error:
+            log_operation(
+                conn,
+                "sync_playlist_tracks",
+                "playlist",
+                "skipped",
+                target_id=playlist["id"],
+                target_name=playlist.get("name"),
+                protected_target=True,
+                details={"error": str(error)},
+            )
+            continue
+        for position, item in enumerate(playlist_items):
             track = item.get("track")
             if not track or not track.get("id"):
                 continue
