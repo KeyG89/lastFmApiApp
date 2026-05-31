@@ -52,6 +52,8 @@ Authorize once:
 .venv/bin/lastfm-app spotify auth
 ```
 
+Re-run auth whenever Spotify scopes change. The current app asks for playlist read/modify, library read/modify, top artists/tracks, and recently played scopes.
+
 List built-in presets and dry-run matching:
 
 ```bash
@@ -70,6 +72,15 @@ You can also create from a text file with one `Artist - Track` per line:
 ```bash
 .venv/bin/lastfm-app spotify create --input my-playlist.txt --name "My Last.fm Playlist"
 ```
+
+Mirror Spotify playlists into SQLite:
+
+```bash
+.venv/bin/lastfm-app spotify sync
+.venv/bin/lastfm-app spotify playlists
+```
+
+Safety rule: playlists created by this app on or after `2026-05-31` are editable by the app. Synced playlists with unknown creation dates are treated as protected. Rename/unfollow/delete-style operations on protected playlists require an exact `--confirm` phrase printed by the CLI.
 
 ## Stack
 

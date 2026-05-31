@@ -12,12 +12,16 @@ Build the data foundation first, then use it for playlists, genre maps, and disc
 | 3 | Diagnostics And Test Harness | Done | [T.3-diagnostics-and-test-harness.md](Items/T.3-diagnostics-and-test-harness.md) | `[T.3]` |
 | 4 | Documentation And Developer Tutorial | Done | [T.4-documentation-and-developer-tutorial.md](Items/T.4-documentation-and-developer-tutorial.md) | `[T.4]` |
 | 5 | Spotify Playlist Export | In Progress | [T.5-deployment-and-release-path.md](Items/T.5-deployment-and-release-path.md) | `[T.5]` |
+| 6 | Spotify Safety And Account Mirror | In Progress | [T.6-spotify-safety-and-account-mirror.md](Items/T.6-spotify-safety-and-account-mirror.md) | `[T.6]` |
+| 7 | Shazam Library Integration | Open | [T.7-shazam-library-integration.md](Items/T.7-shazam-library-integration.md) | `[T.7]` |
+| 8 | Current Music Discovery Expander | Open | [T.8-current-music-discovery-expander.md](Items/T.8-current-music-discovery-expander.md) | `[T.8]` |
 
 ## AI Augmentations
 
 - Add decay-weighted reports that distinguish music loved now from music loved historically.
 - Add Spotify matching/export once the local Last.fm library is reliable.
 - Add discovery surfaces later: music channels, instrumental breakdowns, and recommendation research.
+- Treat unknown Spotify playlist creation dates as protected until proven app-created after 2026-05-31.
 
 ## Workflow Improvements
 

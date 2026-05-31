@@ -9,7 +9,19 @@ from .importer import enrich_artists, enrich_tracks, import_full_history
 from .lastfm import LastfmClient
 from .playlist_presets import PRESETS, PlaylistPreset, PlaylistTrack, parse_track_lines
 from .reports import favorites, genres, status
-from .spotify import SpotifyClient, authenticate, load_spotify_config, save_spotify_matches
+from .spotify import (
+    SpotifyError,
+    SpotifyClient,
+    authenticate,
+    ensure_spotify_schema,
+    load_spotify_config,
+    log_operation,
+    protected_confirmation_phrase,
+    require_playlist_confirmation,
+    save_spotify_matches,
+    sync_spotify_library,
+    upsert_spotify_playlist,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,6 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
     spotify_presets = spotify_sub.add_parser("presets", help="List built-in playlist presets.")
     spotify_presets.add_argument("--verbose", action="store_true", help="Print tracks in each preset.")
 
+    spotify_sync = spotify_sub.add_parser("sync", help="Mirror Spotify account playlists and tracks into SQLite.")
+    spotify_sync.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
+
+    spotify_playlists = spotify_sub.add_parser("playlists", help="List synced Spotify playlists and protection status.")
+    spotify_playlists.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
+    spotify_playlists.add_argument("--limit", type=int, default=50)
+
     spotify_create = spotify_sub.add_parser("create", help="Create a Spotify playlist from a preset or text file.")
     spotify_create.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
     spotify_create.add_argument("--preset", choices=sorted(PRESETS), help="Built-in playlist preset.")
@@ -56,6 +75,17 @@ def build_parser() -> argparse.ArgumentParser:
     spotify_create.add_argument("--description", default="", help="Playlist description override.")
     spotify_create.add_argument("--public", action="store_true", help="Create a public playlist instead of private.")
     spotify_create.add_argument("--dry-run", action="store_true", help="Match tracks but do not create a playlist.")
+
+    spotify_rename = spotify_sub.add_parser("rename", help="Rename a Spotify playlist.")
+    spotify_rename.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
+    spotify_rename.add_argument("playlist_id")
+    spotify_rename.add_argument("name")
+    spotify_rename.add_argument("--confirm", help="Required exact confirmation phrase for protected playlists.")
+
+    spotify_unfollow = spotify_sub.add_parser("unfollow", help="Remove a playlist from the Spotify account.")
+    spotify_unfollow.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
+    spotify_unfollow.add_argument("playlist_id")
+    spotify_unfollow.add_argument("--confirm", help="Required exact confirmation phrase for protected playlists.")
     return parser
 
 
@@ -130,15 +160,48 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"  - {track.artist} - {track.track}")
             return 0
 
+        if args.spotify_command == "sync":
+            spotify_client = _spotify_client_or_error(parser)
+            try:
+                result = sync_spotify_library(conn, spotify_client)
+            except SpotifyError as error:
+                log_operation(
+                    conn,
+                    "sync_library",
+                    "spotify_account",
+                    "failed",
+                    details={"error": str(error)},
+                )
+                raise SystemExit(f"spotify sync failed: {error}\nRun spotify auth again if this says insufficient scope.")
+            print(f"spotify sync complete: playlists={result['playlists']}, playlist_tracks={result['playlist_tracks']}")
+            return 0
+
+        if args.spotify_command == "playlists":
+            ensure_spotify_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT id, name, total_tracks, protected, created_by_app, created_at, external_url
+                FROM spotify_playlists
+                ORDER BY last_seen_at DESC, name COLLATE NOCASE
+                LIMIT ?
+                """,
+                (args.limit,),
+            ).fetchall()
+            if not rows:
+                print("No synced Spotify playlists. Run: lastfm-app spotify sync")
+                return 0
+            for row in rows:
+                state = "protected" if int(row["protected"]) else "editable"
+                source = "app" if int(row["created_by_app"]) else "synced"
+                created = row["created_at"] or "unknown"
+                print(f"{row['id']} | {state} | {source} | tracks={row['total_tracks']} | created={created} | {row['name']}")
+            return 0
+
         if args.spotify_command == "create":
             tracks, default_name, default_description = _spotify_playlist_input(args)
             if not tracks:
                 parser.error("spotify create needs --preset or --input")
-            try:
-                spotify_config = load_spotify_config(require_client=True)
-            except ValueError as error:
-                parser.error(str(error))
-            spotify_client = SpotifyClient(spotify_config)
+            spotify_client = _spotify_client_or_error(parser)
             matches: list[tuple[PlaylistTrack, dict | None]] = []
             for wanted in tracks:
                 match = spotify_client.search_track(wanted)
@@ -151,6 +214,14 @@ def main(argv: list[str] | None = None) -> int:
             save_spotify_matches(conn, matches)
             uris = [match["uri"] for _, match in matches if match and match.get("uri")]
             if args.dry_run:
+                log_operation(
+                    conn,
+                    "match_playlist_dry_run",
+                    "playlist",
+                    "done",
+                    target_name=args.name or default_name,
+                    details={"matched": len(uris), "total": len(tracks), "preset": args.preset},
+                )
                 print(f"dry run: matched {len(uris)}/{len(tracks)} tracks")
                 return 0
             if not uris:
@@ -159,8 +230,54 @@ def main(argv: list[str] | None = None) -> int:
             description = args.description or default_description
             playlist = spotify_client.create_playlist(name, description, public=args.public)
             spotify_client.add_items(playlist["id"], uris)
+            upsert_spotify_playlist(conn, spotify_client.me().get("id"), playlist, created_by_app=True)
+            log_operation(
+                conn,
+                "create_playlist",
+                "playlist",
+                "done",
+                target_id=playlist["id"],
+                target_name=name,
+                protected_target=False,
+                details={"track_count": len(uris), "preset": args.preset, "input": str(args.input) if args.input else None},
+            )
             print(f"spotify playlist created: {playlist.get('external_urls', {}).get('spotify', playlist.get('id'))}")
             print(f"added {len(uris)}/{len(tracks)} tracks")
+            return 0
+
+        if args.spotify_command == "rename":
+            ensure_spotify_schema(conn)
+            require_playlist_confirmation(conn, "rename", args.playlist_id, args.confirm)
+            spotify_client = _spotify_client_or_error(parser)
+            spotify_client.update_playlist_details(args.playlist_id, name=args.name)
+            log_operation(
+                conn,
+                "rename",
+                "playlist",
+                "done",
+                target_id=args.playlist_id,
+                target_name=args.name,
+                protected_target=False,
+                confirmation=args.confirm,
+            )
+            print(f"renamed playlist {args.playlist_id} -> {args.name}")
+            return 0
+
+        if args.spotify_command == "unfollow":
+            ensure_spotify_schema(conn)
+            require_playlist_confirmation(conn, "unfollow", args.playlist_id, args.confirm)
+            spotify_client = _spotify_client_or_error(parser)
+            spotify_client.unfollow_playlist(args.playlist_id)
+            log_operation(
+                conn,
+                "unfollow",
+                "playlist",
+                "done",
+                target_id=args.playlist_id,
+                protected_target=False,
+                confirmation=args.confirm,
+            )
+            print(f"unfollowed playlist {args.playlist_id}")
             return 0
 
     parser.error("unknown command")
@@ -174,6 +291,15 @@ def _spotify_playlist_input(args: argparse.Namespace) -> tuple[list[PlaylistTrac
     if args.input:
         return parse_track_lines(args.input.read_text(encoding="utf-8")), args.name or args.input.stem, args.description
     return [], args.name or "Last.fm Playlist", args.description
+
+
+def _spotify_client_or_error(parser: argparse.ArgumentParser) -> SpotifyClient:
+    try:
+        spotify_config = load_spotify_config(require_client=True)
+        return SpotifyClient(spotify_config)
+    except ValueError as error:
+        parser.error(str(error))
+    raise AssertionError("unreachable")
 
 
 if __name__ == "__main__":
