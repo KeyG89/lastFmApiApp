@@ -53,7 +53,7 @@ PRESETS: dict[str, PlaylistPreset] = {
         name="Morning Rock Bangers",
         description="Garage, hard rock and punk-leaning Last.fm rediscovery for a high-energy morning.",
         tracks=(
-            PlaylistTrack("The Datsuns", "Get Up! (Don't Fight It)"),
+            PlaylistTrack("The Datsuns", "Harmonic Generator"),
             PlaylistTrack("The Hellacopters", "I'm in the Band"),
             PlaylistTrack("The Hives", "Try It Again"),
             PlaylistTrack("The Pink Spiders", "Gimme Chemicals"),

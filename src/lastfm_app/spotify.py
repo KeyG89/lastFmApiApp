@@ -230,7 +230,10 @@ class SpotifyClient:
             items = payload.get("tracks", {}).get("items", [])
         if not items:
             return None
-        return max(items, key=lambda item: match_score(track, item))
+        best = max(items, key=lambda item: match_score(track, item))
+        if match_score(track, best) < 60:
+            return None
+        return best
 
     def create_playlist(self, name: str, description: str, public: bool = False) -> dict[str, Any]:
         return _json_request(
