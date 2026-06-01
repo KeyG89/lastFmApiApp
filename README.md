@@ -105,7 +105,7 @@ Create the generated Shazam playlists on Spotify and record the created playlist
 
 ```bash
 .venv/bin/lastfm-app shazam export-spotify --show
-.venv/bin/lastfm-app shazam export-spotify --no-match --show
+.venv/bin/lastfm-app shazam export-spotify --no-match --delay 10 --show
 .venv/bin/lastfm-app shazam spotify-exports
 ```
 

@@ -123,7 +123,10 @@ def test_shazam_status_empty_database(tmp_path) -> None:
     assert "- tracks: 0" in shazam_status(conn)
 
 
-def test_export_shazam_playlists_to_spotify_records_mapping(tmp_path) -> None:
+def test_export_shazam_playlists_to_spotify_records_mapping(tmp_path, monkeypatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("lastfm_app.shazam.time.sleep", lambda seconds: sleeps.append(seconds))
+
     class FakeSpotify:
         def __init__(self) -> None:
             self.created: list[dict] = []
@@ -161,10 +164,12 @@ def test_export_shazam_playlists_to_spotify_records_mapping(tmp_path) -> None:
     import_shazam_file(conn, source)
     generate_shazam_playlists(conn)
 
-    result = export_shazam_playlists_to_spotify(conn, FakeSpotify())
+    result = export_shazam_playlists_to_spotify(conn, FakeSpotify(), request_delay_seconds=10)
 
     assert result["exported"] >= 2
     assert result["tracks_added"] >= 4
+    assert sleeps
+    assert set(sleeps) == {10}
     assert "Shazam Spotify Exports" in spotify_export_report(conn)
     row = conn.execute("SELECT spotify_playlist_id, tracks_added FROM shazam_spotify_playlist_exports ORDER BY id LIMIT 1").fetchone()
     assert row["spotify_playlist_id"].startswith("playlist-")

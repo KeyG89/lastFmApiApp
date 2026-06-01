@@ -132,6 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     shazam_export = shazam_sub.add_parser("export-spotify", help="Create Spotify playlists from generated Shazam playlists.")
     shazam_export.add_argument("--public", action="store_true", help="Create public Spotify playlists instead of private.")
     shazam_export.add_argument("--no-match", action="store_true", help="Use existing Spotify matches only; do not search Spotify for missing tracks.")
+    shazam_export.add_argument("--delay", type=float, default=0.0, help="Delay in seconds before each Spotify create/add request.")
     shazam_export.add_argument("--show", action="store_true", help="Print recent export records after export.")
 
     shazam_exports = shazam_sub.add_parser("spotify-exports", help="Show recorded Shazam Spotify playlist exports.")
@@ -406,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
                     spotify_client,
                     public=args.public,
                     match_missing=not args.no_match,
+                    request_delay_seconds=args.delay,
                 )
             except SpotifyRateLimitError as error:
                 raise SystemExit(f"shazam spotify export rate limited: {error}")

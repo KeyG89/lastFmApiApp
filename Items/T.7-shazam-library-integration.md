@@ -31,6 +31,7 @@ Create a separate `data/shazam.sqlite3` database by default. Keep raw imported s
 - Tutorial HTML, architecture docs, README, `.env.example`, and diagnostics now document the Shazam path.
 - 2026-06-01 feedback superseded the earlier network-import experiment: user confirmed only the downloaded Shazam web CSV is viable. Removed those unused Shazam import paths.
 - 2026-06-01: Added Spotify export for generated Shazam playlists. The main playlist is energy high-to-low; unknown or weakly-classified tracks are grouped into `Shazam: Various`.
+- 2026-06-01: Added `shazam export-spotify --delay` so Spotify create/add calls can be throttled, while track additions remain batched by Spotify's 100-item API limit.
 
 ## Validation
 
@@ -40,6 +41,7 @@ Create a separate `data/shazam.sqlite3` database by default. Keep raw imported s
 - Generated Shazam playlists: 7 playlists, 318 playlist item rows.
 - Spotify matching reached 153/159 Shazam tracks before Spotify returned a global rate limit.
 - Spotify playlist creation attempted with existing matches only, but Spotify still returned a global rate limit: retry after about 9 hours 23 minutes. No Spotify playlists were created yet, and `shazam_spotify_playlist_exports` remains empty.
+- Retried with `--no-match --delay 10`; Spotify still rate-limited the first create request, with retry after about 16 minutes 23 seconds.
 
 ## User Test Instructions
 
@@ -48,7 +50,7 @@ Create a separate `data/shazam.sqlite3` database by default. Keep raw imported s
 3. Run `.venv/bin/lastfm-app shazam import /Users/krzysztofgoscinski/Downloads/shazamlibrary.csv --link-lastfm`.
 4. Run `.venv/bin/lastfm-app shazam match-spotify --limit 25` after the Spotify rate-limit window clears.
 5. Run `.venv/bin/lastfm-app shazam playlists --show`.
-6. After Spotify rate-limit clears, run `.venv/bin/lastfm-app shazam export-spotify --no-match --show`.
+6. After Spotify rate-limit clears, run `.venv/bin/lastfm-app shazam export-spotify --no-match --delay 10 --show`.
 
 ## Feedback And Fix History
 
