@@ -37,6 +37,9 @@ After user feedback, add a stricter verification pass. Treat seed and popular re
 - Excluded liquid funk rows from funk/New Orleans/songo because liquid funk is DnB, not funk drumming.
 - Excluded psy/trance/dubstep/reggaeton/generic jazz-hop false positives from local Last.fm rows unless explicitly verified.
 - Added `BPM` and `BPM Source` fields to every verified row. These are practice-oriented approximations and need a metronome/chart check before serious study.
+- Added `lastfm-app spotify drum-grooves` to export verified groove playlists to Spotify.
+- Spotify Web API does not expose playlist folders, so exported playlist names use the folder-like prefix `Drums: Grooves / ...`. The user can manually create a Spotify desktop folder named `Drums: Grooves` and drag these playlists into it.
+- Exporter skips already existing app-created/current-account playlist names by default, caches Spotify track matches, batches track additions per playlist, and logs every playlist operation in `spotify_operation_backlog`.
 
 ## Validation
 
@@ -52,6 +55,27 @@ After user feedback, add a stricter verification pass. Treat seed and popular re
     - `B Complex - Beautiful Lies`
     - `Cosmic Gate - Exploration Of Space (Hard Kandy Remix)`
   - Verified export draft reports 259 Spotify-ready rows and 101 excluded / needs-ear-check audit rows.
+- `bash Diagnostics/check.sh` -> pass, including 19 pytest tests.
+- `lastfm-app spotify drum-grooves --dry-run --limit 1 --delay 0` -> parsed 24 playlists and matched first playlist 14/14.
+- `lastfm-app spotify drum-grooves --delay 10` -> created 24 Spotify playlists, added 247 tracks, and left 12 missing tracks for follow-up matching.
+
+## Spotify Export Results
+
+- Created 24 private Spotify playlists named `Drums: Grooves / NN - Groove`.
+- Folder note: Spotify folders cannot be created via Web API; create `Drums: Grooves` manually in Spotify desktop and move these playlists there.
+- Missing tracks to fix with aliases/manual matching:
+  - `Drums: Grooves / 03 - Funk`: Mark Ronson feat. Bruno Mars - Uptown Funk
+  - `Drums: Grooves / 04 - Disco / Four On The Floor`: Daft Punk feat. Pharrell Williams - Get Lucky
+  - `Drums: Grooves / 06 - Bossa Nova`: Stan Getz & Joao Gilberto - So Danco Samba
+  - `Drums: Grooves / 06 - Bossa Nova`: Elis Regina & Tom Jobim - Aguas de Marco
+  - `Drums: Grooves / 06 - Bossa Nova`: Astrud Gilberto - Agua de Beber
+  - `Drums: Grooves / 13 - Cha-Cha`: Poncho Sanchez - Besame Mama
+  - `Drums: Grooves / 15 - Songo`: Los Van Van - La Vida Sin Esperanza
+  - `Drums: Grooves / 16 - Rumba`: Los Muñequitos de Matanzas - Guaguanco
+  - `Drums: Grooves / 16 - Rumba`: Eddie Palmieri - Azucar Pa Ti
+  - `Drums: Grooves / 20 - Dub`: Scientist - Dance of the Vampires
+  - `Drums: Grooves / 20 - Dub`: Mad Professor - Kunte Kinte Dub
+  - `Drums: Grooves / 24 - Afro-Cuban 6/8`: Chucho Valdes - Liberia
 
 ## User Test Instructions
 
@@ -59,6 +83,7 @@ After user feedback, add a stricter verification pass. Treat seed and popular re
 2. Use only rows where `Spotify Ready` is `yes` for Spotify export.
 3. Treat `BPM Source = practice fallback` as a tempo placeholder to verify by metronome or chart.
 4. Keep the original `Docs/DrumGrooveStudyPlaylists.md` as the unverified working draft.
+5. In Spotify desktop, create a folder named `Drums: Grooves` and move the exported `Drums: Grooves / ...` playlists into it.
 
 ## Feedback And Fix History
 

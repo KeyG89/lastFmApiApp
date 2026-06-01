@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .config import LastfmConfig, load_config
 from .db import connect, init_db
+from .drum_grooves import export_verified_drum_grooves_to_spotify, parse_verified_drum_grooves
 from .importer import enrich_artists, enrich_tracks, import_full_history
 from .lastfm import LastfmClient
 from .playlist_presets import PRESETS, PlaylistPreset, PlaylistTrack, parse_track_lines
@@ -93,6 +94,15 @@ def build_parser() -> argparse.ArgumentParser:
     spotify_create.add_argument("--description", default="", help="Playlist description override.")
     spotify_create.add_argument("--public", action="store_true", help="Create a public playlist instead of private.")
     spotify_create.add_argument("--dry-run", action="store_true", help="Match tracks but do not create a playlist.")
+
+    spotify_drum = spotify_sub.add_parser("drum-grooves", help="Create Spotify playlists from the verified drum groove markdown.")
+    spotify_drum.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
+    spotify_drum.add_argument("--input", type=Path, default=Path("Docs/DrumGrooveStudyPlaylistsVerified.md"))
+    spotify_drum.add_argument("--public", action="store_true", help="Create public Spotify playlists instead of private.")
+    spotify_drum.add_argument("--delay", type=float, default=10.0, help="Delay in seconds before each Spotify API request.")
+    spotify_drum.add_argument("--limit", type=int, help="Limit number of playlists processed.")
+    spotify_drum.add_argument("--no-skip-existing", action="store_true", help="Create playlists even when a playlist with the same name is found.")
+    spotify_drum.add_argument("--dry-run", action="store_true", help="Match tracks and report what would be created without creating playlists.")
 
     spotify_rename = spotify_sub.add_parser("rename", help="Rename a Spotify playlist.")
     spotify_rename.add_argument("--db", dest="command_db", type=Path, help="Override SQLite database path.")
@@ -312,6 +322,47 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"spotify playlist created: {playlist.get('external_urls', {}).get('spotify', playlist.get('id'))}")
             print(f"added {len(uris)}/{len(tracks)} tracks")
+            return 0
+
+        if args.spotify_command == "drum-grooves":
+            if not args.input.exists():
+                parser.error(f"drum groove input file does not exist: {args.input}")
+            parsed = parse_verified_drum_grooves(args.input)
+            print(f"drum groove playlists parsed: {len(parsed)}")
+            spotify_client = _spotify_client_or_error(parser)
+            try:
+                result = export_verified_drum_grooves_to_spotify(
+                    conn,
+                    spotify_client,
+                    args.input,
+                    public=args.public,
+                    delay_seconds=args.delay,
+                    limit=args.limit,
+                    skip_existing=not args.no_skip_existing,
+                    dry_run=args.dry_run,
+                )
+            except SpotifyRateLimitError as error:
+                log_operation(
+                    conn,
+                    "create_drum_groove_playlist",
+                    "playlist",
+                    "rate_limited",
+                    details={"retry_after_seconds": error.retry_after_seconds, "error": str(error)},
+                )
+                raise SystemExit(f"drum groove Spotify export rate limited: {error}")
+            print(
+                "drum groove spotify export complete: "
+                f"playlists={result['playlists']}, created={result['created']}, skipped={result['skipped']}, "
+                f"tracks_matched={result['tracks_matched']}, tracks_missing={result['tracks_missing']}"
+            )
+            for playlist in result["created_playlists"]:
+                print(
+                    "created: "
+                    f"{playlist['name']} | added={playlist['tracks_added']} | "
+                    f"missing={playlist['tracks_missing']} | {playlist.get('url') or playlist['id']}"
+                )
+            for playlist in result["skipped_playlists"][:20]:
+                print(f"skipped: {playlist['name']} | {playlist['reason']}")
             return 0
 
         if args.spotify_command == "rename":
