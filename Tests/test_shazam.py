@@ -3,10 +3,9 @@ from __future__ import annotations
 from lastfm_app import db
 from lastfm_app.shazam import (
     connect_shazam,
+    enrich_from_lastfm,
     ensure_shazam_schema,
     generate_shazam_playlists,
-    import_shazam_api_search,
-    import_spotify_shazam_playlist,
     import_shazam_file,
     link_lastfm_tracks,
     playlist_report,
@@ -38,6 +37,35 @@ def test_import_shazam_csv_and_generate_playlists(tmp_path) -> None:
     assert "Shazam: Rock" in report
 
 
+def test_import_web_shazam_csv_with_preamble_and_track_key(tmp_path) -> None:
+    source = tmp_path / "shazamlibrary.csv"
+    source.write_text(
+        "Shazam Library\n"
+        "Index,TagTime,Title,Artist,URL,TrackKey\n"
+        '1,2026-04-18,"My Lovely Man","Red Hot Chili Peppers",https://www.shazam.com/track/226699/my-lovely-man,226699\n',
+        encoding="utf-8",
+    )
+    conn = connect_shazam(tmp_path / "shazam.sqlite3")
+    result = import_shazam_file(conn, source)
+
+    assert result == {"rows_seen": 1, "rows_inserted": 1, "rows_updated": 0}
+    row = conn.execute(
+        """
+        SELECT unique_key, source_index, shazam_track_key, artist_name, track_name, shazamed_at, shazam_url
+        FROM shazam_tracks
+        """
+    ).fetchone()
+    assert dict(row) == {
+        "unique_key": "shazam:226699",
+        "source_index": 1,
+        "shazam_track_key": "226699",
+        "artist_name": "Red Hot Chili Peppers",
+        "track_name": "My Lovely Man",
+        "shazamed_at": "2026-04-18",
+        "shazam_url": "https://www.shazam.com/track/226699/my-lovely-man",
+    }
+
+
 def test_shazam_import_links_to_lastfm(tmp_path) -> None:
     lastfm_conn = db.connect(tmp_path / "lastfm.sqlite3")
     db.init_db(lastfm_conn)
@@ -55,6 +83,31 @@ def test_shazam_import_links_to_lastfm(tmp_path) -> None:
     assert row["lastfm_track_id"] == track_id
 
 
+def test_shazam_enriches_tags_from_lastfm(tmp_path) -> None:
+    lastfm_conn = db.connect(tmp_path / "lastfm.sqlite3")
+    db.init_db(lastfm_conn)
+    artist_id = db.upsert_artist(lastfm_conn, "Known Artist")
+    track_id = db.upsert_track(lastfm_conn, artist_id, None, "Known Track")
+    for tag_id, weight in db.upsert_tags(lastfm_conn, [("electronic", 100), ("rock", 60)]):
+        lastfm_conn.execute(
+            "INSERT INTO track_tags(track_id, tag_id, weight, source) VALUES(?, ?, ?, 'test')",
+            (track_id, tag_id, weight),
+        )
+    lastfm_conn.commit()
+
+    source = tmp_path / "shazam.csv"
+    source.write_text("Title,Artist\nKnown Track,Known Artist\n", encoding="utf-8")
+    shazam_conn = connect_shazam(tmp_path / "shazam.sqlite3")
+    import_shazam_file(shazam_conn, source)
+    link_lastfm_tracks(shazam_conn, lastfm_conn)
+
+    assert enrich_from_lastfm(shazam_conn, lastfm_conn) == 1
+    row = shazam_conn.execute("SELECT genre, tags_json, energy_score FROM shazam_tracks").fetchone()
+    assert row["genre"] == "electronic"
+    assert "electronic" in row["tags_json"]
+    assert row["energy_score"] > 50
+
+
 def test_shazam_energy_score_uses_genres() -> None:
     assert score_energy("ambient", []) < score_energy("rock", [])
     assert score_energy("electronic", ["dance"]) > score_energy("folk", ["acoustic"])
@@ -64,63 +117,3 @@ def test_shazam_status_empty_database(tmp_path) -> None:
     conn = connect_shazam(tmp_path / "shazam.sqlite3")
     ensure_shazam_schema(conn)
     assert "- tracks: 0" in shazam_status(conn)
-
-
-def test_import_shazam_api_search(tmp_path) -> None:
-    class FakeShazamApi:
-        def search(self, query: str, limit: int = 5):
-            assert query == "known track"
-            assert limit == 2
-            return [
-                {
-                    "title": "Known Track",
-                    "subtitle": "Known Artist",
-                    "url": "https://www.shazam.com/track/123/known-track",
-                    "genres": {"primary": "Electronic"},
-                    "hub": {"actions": [{"uri": "https://music.apple.com/album/known-track/123"}]},
-                }
-            ]
-
-    conn = connect_shazam(tmp_path / "shazam.sqlite3")
-    result = import_shazam_api_search(conn, FakeShazamApi(), "known track", limit=2)
-
-    assert result == {"rows_seen": 1, "rows_inserted": 1, "rows_updated": 0}
-    row = conn.execute("SELECT artist_name, track_name, genre, shazam_url, apple_music_url FROM shazam_tracks").fetchone()
-    assert dict(row) == {
-        "artist_name": "Known Artist",
-        "track_name": "Known Track",
-        "genre": "Electronic",
-        "shazam_url": "https://www.shazam.com/track/123/known-track",
-        "apple_music_url": "https://music.apple.com/album/known-track/123",
-    }
-
-
-def test_import_spotify_shazam_playlist(tmp_path) -> None:
-    class FakeSpotify:
-        def playlist_tracks(self, playlist_id: str):
-            assert playlist_id == "playlist1"
-            return [
-                {
-                    "added_at": "2026-05-31T10:00:00Z",
-                    "track": {
-                        "id": "spotify1",
-                        "uri": "spotify:track:spotify1",
-                        "name": "Playlist Track",
-                        "popularity": 72,
-                        "external_urls": {"spotify": "https://open.spotify.com/track/spotify1"},
-                        "artists": [{"name": "Playlist Artist"}],
-                        "album": {"name": "Playlist Album", "album_type": "single"},
-                    },
-                }
-            ]
-
-    conn = connect_shazam(tmp_path / "shazam.sqlite3")
-    result = import_spotify_shazam_playlist(conn, FakeSpotify(), "playlist1")
-
-    assert result == {"rows_seen": 1, "rows_inserted": 1, "rows_updated": 0}
-    row = conn.execute("SELECT spotify_track_id, spotify_uri, spotify_popularity FROM shazam_tracks").fetchone()
-    assert dict(row) == {
-        "spotify_track_id": "spotify1",
-        "spotify_uri": "spotify:track:spotify1",
-        "spotify_popularity": 72,
-    }

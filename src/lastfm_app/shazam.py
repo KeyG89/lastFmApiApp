@@ -4,9 +4,6 @@ import csv
 import json
 import os
 import sqlite3
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -18,62 +15,16 @@ from .spotify import SpotifyClient
 
 
 DEFAULT_SHAZAM_DB_PATH = Path("data/shazam.sqlite3")
-SHAZAM_RAPIDAPI_ROOT = "https://shazam.p.rapidapi.com"
-
-
-class ShazamApiError(RuntimeError):
-    pass
 
 
 @dataclass(frozen=True)
 class ShazamConfig:
     db_path: Path
-    rapidapi_key: str | None = None
-    rapidapi_host: str = "shazam.p.rapidapi.com"
-    locale: str = "en-US"
 
 
 def load_shazam_config() -> ShazamConfig:
     load_dotenv()
-    return ShazamConfig(
-        db_path=Path(os.environ.get("SHAZAM_DB_PATH", str(DEFAULT_SHAZAM_DB_PATH))).expanduser(),
-        rapidapi_key=os.environ.get("SHAZAM_RAPIDAPI_KEY") or None,
-        rapidapi_host=os.environ.get("SHAZAM_RAPIDAPI_HOST", "shazam.p.rapidapi.com"),
-        locale=os.environ.get("SHAZAM_LOCALE", "en-US"),
-    )
-
-
-class ShazamApiClient:
-    def __init__(self, config: ShazamConfig):
-        if not config.rapidapi_key:
-            raise ShazamApiError("SHAZAM_RAPIDAPI_KEY is required in .env for Shazam API calls.")
-        self.config = config
-
-    def search(self, term: str, limit: int = 5) -> list[dict[str, Any]]:
-        params = urllib.parse.urlencode({"term": term, "locale": self.config.locale, "offset": "0", "limit": str(limit)})
-        payload = self._request(f"{SHAZAM_RAPIDAPI_ROOT}/search?{params}")
-        return _extract_shazam_hits(payload)
-
-    def get_details(self, key: str) -> dict[str, Any]:
-        params = urllib.parse.urlencode({"key": key, "locale": self.config.locale})
-        return self._request(f"{SHAZAM_RAPIDAPI_ROOT}/songs/get-details?{params}")
-
-    def _request(self, url: str) -> dict[str, Any]:
-        request = urllib.request.Request(
-            url,
-            headers={
-                "Accept": "application/json",
-                "X-RapidAPI-Key": self.config.rapidapi_key or "",
-                "X-RapidAPI-Host": self.config.rapidapi_host,
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                raw = response.read().decode("utf-8")
-                return json.loads(raw) if raw else {}
-        except urllib.error.HTTPError as error:
-            raw = error.read().decode("utf-8", errors="replace")
-            raise ShazamApiError(f"Shazam API HTTP {error.code}: {raw[:500]}") from error
+    return ShazamConfig(db_path=Path(os.environ.get("SHAZAM_DB_PATH", str(DEFAULT_SHAZAM_DB_PATH))).expanduser())
 
 
 def connect_shazam(db_path: Path | None = None) -> sqlite3.Connection:
@@ -99,6 +50,8 @@ def ensure_shazam_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS shazam_tracks (
           id INTEGER PRIMARY KEY,
           unique_key TEXT NOT NULL UNIQUE,
+          source_index INTEGER,
+          shazam_track_key TEXT,
           artist_name TEXT NOT NULL,
           track_name TEXT NOT NULL,
           normalized_artist_name TEXT NOT NULL,
@@ -144,6 +97,9 @@ def ensure_shazam_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_shazam_tracks_genre ON shazam_tracks(genre);
         """
     )
+    _ensure_column(conn, "shazam_tracks", "source_index", "INTEGER")
+    _ensure_column(conn, "shazam_tracks", "shazam_track_key", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_shazam_tracks_track_key ON shazam_tracks(shazam_track_key)")
     conn.commit()
 
 
@@ -182,93 +138,25 @@ def import_shazam_file(conn: sqlite3.Connection, path: Path) -> dict[str, int]:
     return {"rows_seen": rows_seen, "rows_inserted": rows_inserted, "rows_updated": rows_updated}
 
 
-def import_shazam_api_search(conn: sqlite3.Connection, api_client: ShazamApiClient, query: str, limit: int = 5) -> dict[str, int]:
-    ensure_shazam_schema(conn)
-    run_id = _start_import_run(conn, Path(f"shazam-api-search:{query}"), "rapidapi-search")
-    rows_seen = rows_inserted = rows_updated = 0
-    try:
-        for hit in api_client.search(query, limit=limit):
-            rows_seen += 1
-            parsed = parse_shazam_api_track(hit)
-            if parsed is None:
-                continue
-            existed = upsert_shazam_track(conn, parsed, Path("shazam-api"))
-            if existed:
-                rows_updated += 1
-            else:
-                rows_inserted += 1
-        conn.execute(
-            """
-            UPDATE shazam_import_runs
-            SET finished_at=CURRENT_TIMESTAMP, status='done', rows_seen=?, rows_inserted=?, rows_updated=?
-            WHERE id=?
-            """,
-            (rows_seen, rows_inserted, rows_updated, run_id),
-        )
-        conn.commit()
-    except Exception as error:
-        conn.execute(
-            "UPDATE shazam_import_runs SET finished_at=CURRENT_TIMESTAMP, status='failed', error=? WHERE id=?",
-            (str(error), run_id),
-        )
-        conn.commit()
-        raise
-    return {"rows_seen": rows_seen, "rows_inserted": rows_inserted, "rows_updated": rows_updated}
-
-
-def import_spotify_shazam_playlist(conn: sqlite3.Connection, spotify_client: SpotifyClient, playlist_id: str) -> dict[str, int]:
-    ensure_shazam_schema(conn)
-    run_id = _start_import_run(conn, Path(f"spotify-playlist:{playlist_id}"), "spotify-playlist-api")
-    rows_seen = rows_inserted = rows_updated = 0
-    try:
-        for item in spotify_client.playlist_tracks(playlist_id):
-            track = item.get("track") or {}
-            if not track.get("name") or not track.get("artists"):
-                continue
-            rows_seen += 1
-            parsed = parse_spotify_playlist_track(track, item.get("added_at"))
-            existed = upsert_shazam_track(conn, parsed, Path(f"spotify-playlist:{playlist_id}"))
-            _apply_spotify_match(conn, track, parsed)
-            if existed:
-                rows_updated += 1
-            else:
-                rows_inserted += 1
-        conn.execute(
-            """
-            UPDATE shazam_import_runs
-            SET finished_at=CURRENT_TIMESTAMP, status='done', rows_seen=?, rows_inserted=?, rows_updated=?
-            WHERE id=?
-            """,
-            (rows_seen, rows_inserted, rows_updated, run_id),
-        )
-        conn.commit()
-    except Exception as error:
-        conn.execute(
-            "UPDATE shazam_import_runs SET finished_at=CURRENT_TIMESTAMP, status='failed', error=? WHERE id=?",
-            (str(error), run_id),
-        )
-        conn.commit()
-        raise
-    return {"rows_seen": rows_seen, "rows_inserted": rows_inserted, "rows_updated": rows_updated}
-
-
 def read_source_rows(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         raise FileNotFoundError(path)
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
-            return [dict(row) for row in csv.DictReader(handle)]
-    if suffix == ".json":
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, list):
-            return [dict(row) for row in payload if isinstance(row, dict)]
-        if isinstance(payload, dict):
-            for key in ("tracks", "shazams", "items", "data"):
-                if isinstance(payload.get(key), list):
-                    return [dict(row) for row in payload[key] if isinstance(row, dict)]
-            return [payload]
-    raise ValueError(f"Unsupported Shazam import file: {path}. Use CSV or JSON.")
+        return read_csv_rows(path)
+    raise ValueError(f"Unsupported Shazam import file: {path}. Use the CSV downloaded from Shazam on the web.")
+
+
+def read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    header_index = 0
+    for index, line in enumerate(lines):
+        normalized = line.strip().casefold()
+        if normalized.startswith("index,") or "tagtime" in normalized and "title" in normalized and "artist" in normalized:
+            header_index = index
+            break
+    csv_text = "\n".join(lines[header_index:])
+    return [dict(row) for row in csv.DictReader(csv_text.splitlines())]
 
 
 def parse_source_row(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -278,12 +166,14 @@ def parse_source_row(row: dict[str, Any]) -> dict[str, Any] | None:
     if not track_name or not artist_name:
         return None
     album_name = _first(normalized, "album", "album name", "release")
-    shazamed_at = _first(normalized, "date shazamed", "shazamed at", "timestamp", "created at", "date")
+    shazamed_at = _first(normalized, "tagtime", "date shazamed", "shazamed at", "timestamp", "created at", "date")
     genre = _first(normalized, "genre", "genres", "primary genre")
     tags = parse_tags(_first(normalized, "tags", "tag", "genres", "moods") or "")
     if genre and genre not in tags:
         tags.insert(0, genre)
     return {
+        "source_index": _int_or_none(_first(normalized, "index")),
+        "shazam_track_key": str(_first(normalized, "trackkey", "track key", "shazam track key") or "").strip() or None,
         "artist_name": str(artist_name).strip(),
         "track_name": str(track_name).strip(),
         "album_name": str(album_name).strip() if album_name else None,
@@ -293,46 +183,6 @@ def parse_source_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "shazam_url": _first(normalized, "shazam url", "url", "web url"),
         "apple_music_url": _first(normalized, "apple music url", "apple url", "music url"),
         "source": row,
-    }
-
-
-def parse_shazam_api_track(track: dict[str, Any]) -> dict[str, Any] | None:
-    title = track.get("title") or track.get("heading", {}).get("title")
-    subtitle = track.get("subtitle") or track.get("heading", {}).get("subtitle")
-    if not title or not subtitle:
-        return None
-    sections = track.get("sections") or []
-    metadata = _metadata_from_sections(sections)
-    genres = track.get("genres") or {}
-    genre = genres.get("primary") or metadata.get("Genre")
-    return {
-        "artist_name": str(subtitle).strip(),
-        "track_name": str(title).strip(),
-        "album_name": metadata.get("Album"),
-        "shazamed_at": None,
-        "genre": genre,
-        "tags": parse_tags([genre] if genre else []),
-        "shazam_url": track.get("url"),
-        "apple_music_url": _apple_music_url(track),
-        "source": track,
-    }
-
-
-def parse_spotify_playlist_track(track: dict[str, Any], added_at: str | None) -> dict[str, Any]:
-    artists = track.get("artists") or []
-    album = track.get("album") or {}
-    artist_name = artists[0].get("name", "") if artists else ""
-    tags = parse_tags([album.get("album_type") or ""])
-    return {
-        "artist_name": artist_name,
-        "track_name": track.get("name", ""),
-        "album_name": album.get("name"),
-        "shazamed_at": added_at,
-        "genre": None,
-        "tags": tags,
-        "shazam_url": None,
-        "apple_music_url": None,
-        "source": track,
     }
 
 
@@ -355,16 +205,19 @@ def parse_tags(value: str | Iterable[str]) -> list[str]:
 def upsert_shazam_track(conn: sqlite3.Connection, parsed: dict[str, Any], source_path: Path) -> bool:
     artist_norm = normalize_name(parsed["artist_name"])
     track_norm = normalize_name(parsed["track_name"])
-    unique_key = "|".join([artist_norm, track_norm, parsed.get("shazamed_at") or ""])
+    shazam_track_key = parsed.get("shazam_track_key")
+    unique_key = f"shazam:{shazam_track_key}" if shazam_track_key else "|".join([artist_norm, track_norm, parsed.get("shazamed_at") or ""])
     existed = conn.execute("SELECT 1 FROM shazam_tracks WHERE unique_key = ?", (unique_key,)).fetchone() is not None
     energy_score = score_energy(parsed.get("genre"), parsed.get("tags") or [])
     conn.execute(
         """
         INSERT INTO shazam_tracks(
-          unique_key, artist_name, track_name, normalized_artist_name, normalized_track_name, album_name, shazamed_at,
+          unique_key, source_index, shazam_track_key, artist_name, track_name, normalized_artist_name, normalized_track_name, album_name, shazamed_at,
           genre, tags_json, shazam_url, apple_music_url, energy_score, source_path, source_json
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(unique_key) DO UPDATE SET
+          source_index=COALESCE(excluded.source_index, shazam_tracks.source_index),
+          shazam_track_key=COALESCE(excluded.shazam_track_key, shazam_tracks.shazam_track_key),
           album_name=COALESCE(excluded.album_name, shazam_tracks.album_name),
           genre=COALESCE(excluded.genre, shazam_tracks.genre),
           tags_json=excluded.tags_json,
@@ -377,6 +230,8 @@ def upsert_shazam_track(conn: sqlite3.Connection, parsed: dict[str, Any], source
         """,
         (
             unique_key,
+            parsed.get("source_index"),
+            shazam_track_key,
             parsed["artist_name"],
             parsed["track_name"],
             artist_norm,
@@ -417,6 +272,28 @@ def link_lastfm_tracks(shazam_conn: sqlite3.Connection, lastfm_conn: sqlite3.Con
             linked += 1
     shazam_conn.commit()
     return linked
+
+
+def enrich_from_lastfm(shazam_conn: sqlite3.Connection, lastfm_conn: sqlite3.Connection) -> int:
+    ensure_shazam_schema(shazam_conn)
+    rows = shazam_conn.execute("SELECT id, lastfm_track_id FROM shazam_tracks WHERE lastfm_track_id IS NOT NULL").fetchall()
+    enriched = 0
+    for row in rows:
+        tags = _lastfm_tags_for_track(lastfm_conn, int(row["lastfm_track_id"]))
+        if not tags:
+            continue
+        genre = tags[0]
+        shazam_conn.execute(
+            """
+            UPDATE shazam_tracks
+            SET genre=?, tags_json=?, energy_score=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (genre, json.dumps(tags, ensure_ascii=False), score_energy(genre, tags), row["id"]),
+        )
+        enriched += 1
+    shazam_conn.commit()
+    return enriched
 
 
 def match_spotify_tracks(conn: sqlite3.Connection, client: SpotifyClient, limit: int | None = None) -> dict[str, int]:
@@ -623,6 +500,41 @@ def _vibe_for_rows(rows: list[sqlite3.Row]) -> str:
     return "very energetic, intense, peak-time"
 
 
+def _lastfm_tags_for_track(conn: sqlite3.Connection, track_id: int) -> list[str]:
+    track_tags = conn.execute(
+        """
+        SELECT tg.name, COALESCE(tt.weight, 0) AS weight
+        FROM track_tags tt
+        JOIN tags tg ON tg.id = tt.tag_id
+        WHERE tt.track_id = ?
+        ORDER BY weight DESC, tg.name COLLATE NOCASE
+        LIMIT 8
+        """,
+        (track_id,),
+    ).fetchall()
+    artist_tags = conn.execute(
+        """
+        SELECT tg.name, COALESCE(at.weight, 0) AS weight
+        FROM tracks tr
+        JOIN artist_tags at ON at.artist_id = tr.artist_id
+        JOIN tags tg ON tg.id = at.tag_id
+        WHERE tr.id = ?
+        ORDER BY weight DESC, tg.name COLLATE NOCASE
+        LIMIT 8
+        """,
+        (track_id,),
+    ).fetchall()
+    tags: list[str] = []
+    seen: set[str] = set()
+    for row in [*track_tags, *artist_tags]:
+        tag = row["name"]
+        normalized = normalize_name(tag)
+        if normalized not in seen:
+            tags.append(tag)
+            seen.add(normalized)
+    return tags[:10]
+
+
 def _start_import_run(conn: sqlite3.Connection, path: Path, source_type: str) -> int:
     cursor = conn.execute(
         "INSERT INTO shazam_import_runs(source_path, source_type, status) VALUES(?, ?, 'running')",
@@ -630,65 +542,6 @@ def _start_import_run(conn: sqlite3.Connection, path: Path, source_type: str) ->
     )
     conn.commit()
     return int(cursor.lastrowid)
-
-
-def _extract_shazam_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    tracks = payload.get("tracks")
-    if isinstance(tracks, dict):
-        hits = tracks.get("hits") or []
-    else:
-        hits = payload.get("hits") or []
-    result: list[dict[str, Any]] = []
-    for hit in hits:
-        if not isinstance(hit, dict):
-            continue
-        track = hit.get("track") if isinstance(hit.get("track"), dict) else hit
-        if isinstance(track, dict):
-            result.append(track)
-    return result
-
-
-def _metadata_from_sections(sections: list[dict[str, Any]]) -> dict[str, str]:
-    metadata: dict[str, str] = {}
-    for section in sections:
-        for item in section.get("metadata") or []:
-            title = item.get("title")
-            text = item.get("text")
-            if title and text:
-                metadata[str(title)] = str(text)
-    return metadata
-
-
-def _apple_music_url(track: dict[str, Any]) -> str | None:
-    for hub_action in track.get("hub", {}).get("actions") or []:
-        uri = hub_action.get("uri")
-        if isinstance(uri, str) and "music.apple.com" in uri:
-            return uri
-    return None
-
-
-def _apply_spotify_match(conn: sqlite3.Connection, spotify_track: dict[str, Any], parsed: dict[str, Any]) -> None:
-    unique_key = "|".join(
-        [
-            normalize_name(parsed["artist_name"]),
-            normalize_name(parsed["track_name"]),
-            parsed.get("shazamed_at") or "",
-        ]
-    )
-    conn.execute(
-        """
-        UPDATE shazam_tracks
-        SET spotify_track_id=?, spotify_uri=?, spotify_url=?, spotify_popularity=?, updated_at=CURRENT_TIMESTAMP
-        WHERE unique_key=?
-        """,
-        (
-            spotify_track.get("id"),
-            spotify_track.get("uri"),
-            spotify_track.get("external_urls", {}).get("spotify"),
-            spotify_track.get("popularity"),
-            unique_key,
-        ),
-    )
 
 
 def _clean_key(key: str) -> str:
@@ -701,3 +554,18 @@ def _first(row: dict[str, Any], *keys: str) -> Any | None:
         if value not in (None, ""):
             return value
     return None
+
+
+def _int_or_none(value: Any | None) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value))
+    except ValueError:
+        return None
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

@@ -84,30 +84,13 @@ Safety rule: playlists created by this app on or after `2026-05-31` are editable
 
 ## Shazam Library
 
-Shazam data is stored in a separate local SQLite database, `data/shazam.sqlite3` by default. API-backed import is supported in two ways:
-
-- Shazam/RapidAPI catalog search via `SHAZAM_RAPIDAPI_KEY`.
-- Spotify API import from a synced playlist such as `My Shazam Tracks`.
-
-Configure Shazam API access in `.env`:
-
-```bash
-SHAZAM_RAPIDAPI_KEY=
-SHAZAM_RAPIDAPI_HOST=shazam.p.rapidapi.com
-SHAZAM_LOCALE=en-US
-```
+Shazam data is stored in a separate local SQLite database, `data/shazam.sqlite3` by default. The supported source is the CSV downloaded from Shazam on the web. The import preserves Shazam `TrackKey`, normalized artist/title keys, the Shazam URL, tag time, and raw source rows so the data can later be matched against Last.fm, Spotify, or web research. Linked Shazam tracks can be enriched with local Last.fm tags for genre and energy grouping.
 
 ```bash
 .venv/bin/lastfm-app shazam init
-.venv/bin/lastfm-app shazam api-check
-.venv/bin/lastfm-app shazam api-search "The Hives Try It Again" --limit 5
+.venv/bin/lastfm-app shazam import /Users/krzysztofgoscinski/Downloads/shazamlibrary.csv --link-lastfm
+.venv/bin/lastfm-app shazam enrich-lastfm
 .venv/bin/lastfm-app shazam status
-```
-
-If Shazam syncs to a Spotify playlist on your account, import that playlist through the Spotify API:
-
-```bash
-.venv/bin/lastfm-app shazam import-spotify-playlist PLAYLIST_ID --link-lastfm
 ```
 
 Generate local playlist plans from all imported Shazams:
@@ -116,10 +99,10 @@ Generate local playlist plans from all imported Shazams:
 .venv/bin/lastfm-app shazam playlists --show
 ```
 
-The all-track playlist is sorted from calmest to most energetic. Genre playlists are generated to cover the whole imported Shazam library. CSV/JSON import remains available as a fallback:
+The all-track playlist is sorted from calmest to most energetic. Genre playlists are generated to cover the whole imported Shazam library. After the Spotify rate-limit window clears, imported Shazam rows can be enriched with Spotify IDs and URLs:
 
 ```bash
-.venv/bin/lastfm-app shazam import path/to/shazam.csv --link-lastfm
+.venv/bin/lastfm-app shazam match-spotify --limit 25
 ```
 
 ## Stack

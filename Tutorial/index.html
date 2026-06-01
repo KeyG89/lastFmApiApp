@@ -96,13 +96,13 @@ bash Diagnostics/check.sh</code></pre></div>
           <p class="eyebrow">Shazam path</p>
           <h2>Import discoveries and generate local playlists</h2>
         </div>
-        <p>Shazam API and synced Spotify playlist imports land in a separate SQLite database, then playlist plans are generated from calm to energetic and by genre coverage.</p>
+        <p>Shazam web CSV imports land in a separate SQLite database, then playlist plans are generated from calm to energetic and by genre coverage.</p>
       </div>
       <div class="tutorial-grid">
         <div class="command-card"><h3>1. Initialize</h3><pre><code>.venv/bin/lastfm-app shazam init
-.venv/bin/lastfm-app shazam api-check</code></pre></div>
-        <div class="command-card"><h3>2. API import</h3><pre><code>.venv/bin/lastfm-app shazam api-search "artist track" --limit 5
-.venv/bin/lastfm-app shazam import-spotify-playlist PLAYLIST_ID --link-lastfm</code></pre></div>
+.venv/bin/lastfm-app shazam status</code></pre></div>
+        <div class="command-card"><h3>2. Import CSV</h3><pre><code>.venv/bin/lastfm-app shazam import /Users/krzysztofgoscinski/Downloads/shazamlibrary.csv --link-lastfm
+.venv/bin/lastfm-app shazam enrich-lastfm</code></pre></div>
         <div class="command-card"><h3>3. Playlists</h3><pre><code>.venv/bin/lastfm-app shazam playlists --show
 .venv/bin/lastfm-app shazam playlists --show --limit 20</code></pre></div>
       </div>
