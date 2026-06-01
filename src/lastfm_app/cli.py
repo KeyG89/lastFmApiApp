@@ -13,6 +13,7 @@ from .shazam import (
     connect_shazam,
     enrich_from_lastfm,
     ensure_shazam_schema,
+    export_shazam_playlists_to_spotify,
     generate_shazam_playlists,
     import_shazam_file,
     link_lastfm_tracks,
@@ -20,6 +21,7 @@ from .shazam import (
     match_spotify_tracks,
     playlist_report,
     shazam_status,
+    spotify_export_report,
 )
 from .spotify import (
     SpotifyError,
@@ -126,6 +128,14 @@ def build_parser() -> argparse.ArgumentParser:
     shazam_playlists = shazam_sub.add_parser("playlists", help="Generate Shazam calm-to-energetic and genre playlists.")
     shazam_playlists.add_argument("--show", action="store_true", help="Print generated playlist contents.")
     shazam_playlists.add_argument("--limit", type=int, help="Limit printed tracks per playlist when using --show.")
+
+    shazam_export = shazam_sub.add_parser("export-spotify", help="Create Spotify playlists from generated Shazam playlists.")
+    shazam_export.add_argument("--public", action="store_true", help="Create public Spotify playlists instead of private.")
+    shazam_export.add_argument("--no-match", action="store_true", help="Use existing Spotify matches only; do not search Spotify for missing tracks.")
+    shazam_export.add_argument("--show", action="store_true", help="Print recent export records after export.")
+
+    shazam_exports = shazam_sub.add_parser("spotify-exports", help="Show recorded Shazam Spotify playlist exports.")
+    shazam_exports.add_argument("--limit", type=int, default=20)
 
     shazam_status_parser = shazam_sub.add_parser("status", help="Print Shazam database status.")
     shazam_status_parser.set_defaults(_shazam_parser=True)
@@ -386,6 +396,31 @@ def main(argv: list[str] | None = None) -> int:
             if args.show:
                 print()
                 print(playlist_report(shazam_conn, limit=args.limit))
+            return 0
+
+        if args.shazam_command == "export-spotify":
+            spotify_client = _spotify_client_or_error(parser)
+            try:
+                result = export_shazam_playlists_to_spotify(
+                    shazam_conn,
+                    spotify_client,
+                    public=args.public,
+                    match_missing=not args.no_match,
+                )
+            except SpotifyRateLimitError as error:
+                raise SystemExit(f"shazam spotify export rate limited: {error}")
+            print(
+                "shazam spotify export complete: "
+                f"playlists={result['playlists']}, exported={result['exported']}, "
+                f"tracks_added={result['tracks_added']}, tracks_missing={result['tracks_missing']}"
+            )
+            if args.show:
+                print()
+                print(spotify_export_report(shazam_conn))
+            return 0
+
+        if args.shazam_command == "spotify-exports":
+            print(spotify_export_report(shazam_conn, limit=args.limit))
             return 0
 
         if args.shazam_command == "status":

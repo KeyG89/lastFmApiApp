@@ -99,10 +99,14 @@ Generate local playlist plans from all imported Shazams:
 .venv/bin/lastfm-app shazam playlists --show
 ```
 
-The all-track playlist is sorted from calmest to most energetic. Genre playlists are generated to cover the whole imported Shazam library. After the Spotify rate-limit window clears, imported Shazam rows can be enriched with Spotify IDs and URLs:
+The all-track playlist is sorted from most energetic to least energetic. Genre playlists are generated to cover the whole imported Shazam library. Unknown or weakly-classified tracks go to `Shazam: Various`.
+
+Create the generated Shazam playlists on Spotify and record the created playlist IDs/URLs locally:
 
 ```bash
-.venv/bin/lastfm-app shazam match-spotify --limit 25
+.venv/bin/lastfm-app shazam export-spotify --show
+.venv/bin/lastfm-app shazam export-spotify --no-match --show
+.venv/bin/lastfm-app shazam spotify-exports
 ```
 
 ## Stack

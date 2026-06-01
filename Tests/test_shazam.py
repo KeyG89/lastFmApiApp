@@ -5,12 +5,14 @@ from lastfm_app.shazam import (
     connect_shazam,
     enrich_from_lastfm,
     ensure_shazam_schema,
+    export_shazam_playlists_to_spotify,
     generate_shazam_playlists,
     import_shazam_file,
     link_lastfm_tracks,
     playlist_report,
     score_energy,
     shazam_status,
+    spotify_export_report,
 )
 
 
@@ -20,21 +22,23 @@ def test_import_shazam_csv_and_generate_playlists(tmp_path) -> None:
         "Title,Artist,Date Shazamed,Genre,Shazam URL\n"
         "Quiet Light,Low Artist,2026-05-01,ambient,https://shazam.example/quiet\n"
         "Morning Drive,Rock Artist,2026-05-02,rock,https://shazam.example/drive\n"
-        "Night Circuit,Dance Artist,2026-05-03,electronic,https://shazam.example/night\n",
+        "Night Circuit,Dance Artist,2026-05-03,electronic,https://shazam.example/night\n"
+        "Unknown State,Various Artist,2026-05-04,,https://shazam.example/unknown\n",
         encoding="utf-8",
     )
     conn = connect_shazam(tmp_path / "shazam.sqlite3")
     result = import_shazam_file(conn, source)
 
-    assert result == {"rows_seen": 3, "rows_inserted": 3, "rows_updated": 0}
+    assert result == {"rows_seen": 4, "rows_inserted": 4, "rows_updated": 0}
     generated = generate_shazam_playlists(conn)
     assert generated["playlists"] >= 3
 
     report = playlist_report(conn)
-    assert "All Shazams: Calm To Energetic" in report
-    assert report.index("Low Artist - Quiet Light") < report.index("Rock Artist - Morning Drive")
+    assert "Shazam: Energy High To Low" in report
+    assert report.index("Rock Artist - Morning Drive") < report.index("Low Artist - Quiet Light")
     assert "Shazam: Electronic" in report
     assert "Shazam: Rock" in report
+    assert "Shazam: Various" in report
 
 
 def test_import_web_shazam_csv_with_preamble_and_track_key(tmp_path) -> None:
@@ -117,3 +121,51 @@ def test_shazam_status_empty_database(tmp_path) -> None:
     conn = connect_shazam(tmp_path / "shazam.sqlite3")
     ensure_shazam_schema(conn)
     assert "- tracks: 0" in shazam_status(conn)
+
+
+def test_export_shazam_playlists_to_spotify_records_mapping(tmp_path) -> None:
+    class FakeSpotify:
+        def __init__(self) -> None:
+            self.created: list[dict] = []
+
+        def search_track(self, track):
+            return {
+                "id": f"id-{track.artist}-{track.track}",
+                "uri": f"spotify:track:{track.artist}:{track.track}",
+                "external_urls": {"spotify": f"https://open.spotify.test/{track.artist}/{track.track}"},
+                "popularity": 50,
+            }
+
+        def create_playlist(self, name: str, description: str, public: bool = False):
+            playlist = {
+                "id": f"playlist-{len(self.created) + 1}",
+                "uri": f"spotify:playlist:{len(self.created) + 1}",
+                "external_urls": {"spotify": f"https://open.spotify.test/playlist/{len(self.created) + 1}"},
+                "name": name,
+            }
+            self.created.append(playlist)
+            return playlist
+
+        def add_items(self, playlist_id: str, uris: list[str]) -> None:
+            assert playlist_id
+            assert uris
+
+    source = tmp_path / "shazam.csv"
+    source.write_text(
+        "Title,Artist,Genre\n"
+        "Quiet Light,Low Artist,ambient\n"
+        "Morning Drive,Rock Artist,rock\n",
+        encoding="utf-8",
+    )
+    conn = connect_shazam(tmp_path / "shazam.sqlite3")
+    import_shazam_file(conn, source)
+    generate_shazam_playlists(conn)
+
+    result = export_shazam_playlists_to_spotify(conn, FakeSpotify())
+
+    assert result["exported"] >= 2
+    assert result["tracks_added"] >= 4
+    assert "Shazam Spotify Exports" in spotify_export_report(conn)
+    row = conn.execute("SELECT spotify_playlist_id, tracks_added FROM shazam_spotify_playlist_exports ORDER BY id LIMIT 1").fetchone()
+    assert row["spotify_playlist_id"].startswith("playlist-")
+    assert row["tracks_added"] > 0

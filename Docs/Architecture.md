@@ -17,6 +17,6 @@ Generated databases live under `data/` by default and are ignored by git. Secret
 ## Databases
 
 - `data/lastfm.sqlite3`: canonical Last.fm music memory, Last.fm metadata, local Spotify mirror tables, Spotify operation backlog, and Spotify-to-Last.fm links.
-- `data/shazam.sqlite3`: imported Shazam discoveries, raw source rows, optional Last.fm/Spotify links, and generated Shazam playlist plans.
+- `data/shazam.sqlite3`: imported Shazam discoveries, raw source rows, optional Last.fm/Spotify links, generated Shazam playlist plans, and records of Spotify playlists created from those plans.
 
 Shazam stays in a separate database because it is a discovery inbox rather than a listening-history source. Cross-database links use Shazam `TrackKey`, normalized artist/title keys, Last.fm track IDs, and Spotify IDs when available. Personal Shazam history is imported from the CSV downloaded from Shazam on the web.

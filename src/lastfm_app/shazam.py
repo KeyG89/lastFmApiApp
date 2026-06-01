@@ -92,9 +92,27 @@ def ensure_shazam_schema(conn: sqlite3.Connection) -> None:
           PRIMARY KEY(playlist_id, position)
         );
 
+        CREATE TABLE IF NOT EXISTS shazam_spotify_playlist_exports (
+          id INTEGER PRIMARY KEY,
+          shazam_playlist_id INTEGER NOT NULL REFERENCES shazam_playlists(id) ON DELETE CASCADE,
+          shazam_playlist_name TEXT NOT NULL,
+          spotify_playlist_id TEXT,
+          spotify_uri TEXT,
+          spotify_url TEXT,
+          spotify_name TEXT NOT NULL,
+          status TEXT NOT NULL,
+          tracks_total INTEGER NOT NULL,
+          tracks_matched INTEGER NOT NULL,
+          tracks_added INTEGER NOT NULL,
+          tracks_missing INTEGER NOT NULL,
+          details_json TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE INDEX IF NOT EXISTS idx_shazam_tracks_norm ON shazam_tracks(normalized_artist_name, normalized_track_name);
         CREATE INDEX IF NOT EXISTS idx_shazam_tracks_energy ON shazam_tracks(energy_score, normalized_artist_name, normalized_track_name);
         CREATE INDEX IF NOT EXISTS idx_shazam_tracks_genre ON shazam_tracks(genre);
+        CREATE INDEX IF NOT EXISTS idx_shazam_exports_playlist ON shazam_spotify_playlist_exports(shazam_playlist_id, created_at);
         """
     )
     _ensure_column(conn, "shazam_tracks", "source_index", "INTEGER")
@@ -333,6 +351,101 @@ def match_spotify_tracks(conn: sqlite3.Connection, client: SpotifyClient, limit:
     return {"checked": len(rows), "matched": matched}
 
 
+def export_shazam_playlists_to_spotify(
+    conn: sqlite3.Connection,
+    client: SpotifyClient,
+    public: bool = False,
+    match_missing: bool = True,
+) -> dict[str, int]:
+    ensure_shazam_schema(conn)
+    playlists = conn.execute("SELECT id, name, description, vibe FROM shazam_playlists ORDER BY id").fetchall()
+    if not playlists:
+        generate_shazam_playlists(conn)
+        playlists = conn.execute("SELECT id, name, description, vibe FROM shazam_playlists ORDER BY id").fetchall()
+    exported = 0
+    total_added = 0
+    total_missing = 0
+    for playlist in playlists:
+        rows = conn.execute(
+            """
+            SELECT s.id, s.artist_name, s.track_name, s.spotify_uri
+            FROM shazam_playlist_items i
+            JOIN shazam_tracks s ON s.id = i.shazam_track_id
+            WHERE i.playlist_id = ?
+            ORDER BY i.position
+            """,
+            (playlist["id"],),
+        ).fetchall()
+        uris: list[str] = []
+        missing: list[dict[str, Any]] = []
+        for row in rows:
+            uri = row["spotify_uri"]
+            if not uri and match_missing:
+                uri = _match_one_spotify_track(conn, client, row)
+            if uri:
+                uris.append(uri)
+            else:
+                missing.append({"artist": row["artist_name"], "track": row["track_name"], "shazam_track_id": row["id"]})
+        spotify_name = _spotify_playlist_name(playlist["name"])
+        description = _spotify_playlist_description(playlist["description"], playlist["vibe"])
+        status = "skipped_no_matches"
+        spotify_playlist: dict[str, Any] | None = None
+        if uris:
+            spotify_playlist = client.create_playlist(spotify_name, description, public=public)
+            client.add_items(spotify_playlist["id"], uris)
+            status = "created"
+            exported += 1
+            total_added += len(uris)
+        total_missing += len(missing)
+        conn.execute(
+            """
+            INSERT INTO shazam_spotify_playlist_exports(
+              shazam_playlist_id, shazam_playlist_name, spotify_playlist_id, spotify_uri, spotify_url, spotify_name,
+              status, tracks_total, tracks_matched, tracks_added, tracks_missing, details_json
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                playlist["id"],
+                playlist["name"],
+                spotify_playlist.get("id") if spotify_playlist else None,
+                spotify_playlist.get("uri") if spotify_playlist else None,
+                spotify_playlist.get("external_urls", {}).get("spotify") if spotify_playlist else None,
+                spotify_name,
+                status,
+                len(rows),
+                len(uris),
+                len(uris),
+                len(missing),
+                json.dumps({"missing": missing[:50]}, ensure_ascii=False, sort_keys=True),
+            ),
+        )
+        conn.commit()
+    return {"playlists": len(playlists), "exported": exported, "tracks_added": total_added, "tracks_missing": total_missing}
+
+
+def spotify_export_report(conn: sqlite3.Connection, limit: int = 20) -> str:
+    ensure_shazam_schema(conn)
+    rows = conn.execute(
+        """
+        SELECT shazam_playlist_name, spotify_name, spotify_url, status, tracks_added, tracks_missing, created_at
+        FROM shazam_spotify_playlist_exports
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    if not rows:
+        return "No Shazam Spotify exports recorded yet."
+    lines = ["# Shazam Spotify Exports", ""]
+    for row in rows:
+        url = f" / {row['spotify_url']}" if row["spotify_url"] else ""
+        lines.append(
+            f"- {row['created_at']} | {row['status']} | {row['spotify_name']} | "
+            f"added={row['tracks_added']} missing={row['tracks_missing']}{url}"
+        )
+    return "\n".join(lines)
+
+
 def generate_shazam_playlists(conn: sqlite3.Connection) -> dict[str, int]:
     ensure_shazam_schema(conn)
     conn.execute("DELETE FROM shazam_playlist_items")
@@ -341,7 +454,7 @@ def generate_shazam_playlists(conn: sqlite3.Connection) -> dict[str, int]:
         """
         SELECT *
         FROM shazam_tracks
-        ORDER BY energy_score ASC, COALESCE(genre, ''), normalized_artist_name, normalized_track_name
+        ORDER BY energy_score DESC, COALESCE(genre, ''), normalized_artist_name, normalized_track_name
         """
     ).fetchall()
     if not rows:
@@ -349,10 +462,10 @@ def generate_shazam_playlists(conn: sqlite3.Connection) -> dict[str, int]:
         return {"playlists": 0, "items": 0}
     total_items = _create_playlist(
         conn,
-        name="All Shazams: Calm To Energetic",
-        kind="all_energy",
+        name="Shazam: Energy High To Low",
+        kind="all_energy_desc",
         rows=rows,
-        description="Every imported Shazam track sorted from the calmest to the most energetic.",
+        description="Every imported Shazam track sorted from the most energetic to the least energetic.",
     )
     for bucket, bucket_rows in _genre_buckets(rows).items():
         _create_playlist(
@@ -461,7 +574,7 @@ def bucket_for_track(row: sqlite3.Row) -> str:
     for bucket, needles in buckets:
         if any(needle in text for needle in needles):
             return bucket
-    return "other"
+    return "various"
 
 
 def _create_playlist(conn: sqlite3.Connection, name: str, kind: str, rows: list[sqlite3.Row], description: str) -> int:
@@ -480,11 +593,48 @@ def _create_playlist(conn: sqlite3.Connection, name: str, kind: str, rows: list[
     return len(rows)
 
 
+def _match_one_spotify_track(conn: sqlite3.Connection, client: SpotifyClient, row: sqlite3.Row) -> str | None:
+    match = client.search_track(PlaylistTrack(artist=row["artist_name"], track=row["track_name"]))
+    if not match:
+        return None
+    conn.execute(
+        """
+        UPDATE shazam_tracks
+        SET spotify_track_id=?, spotify_uri=?, spotify_url=?, spotify_popularity=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+        """,
+        (
+            match.get("id"),
+            match.get("uri"),
+            match.get("external_urls", {}).get("spotify"),
+            match.get("popularity"),
+            row["id"],
+        ),
+    )
+    conn.commit()
+    return match.get("uri")
+
+
+def _spotify_playlist_name(name: str) -> str:
+    return name.replace("Shazam: Various", "Shazam: Various / Unknown")
+
+
+def _spotify_playlist_description(description: str | None, vibe: str | None) -> str:
+    parts = [description or "Generated from local Shazam library."]
+    if vibe:
+        parts.append(f"Vibe: {vibe}.")
+    parts.append("Generated by lastFmApiApp from Shazam CSV.")
+    return " ".join(parts)[:300]
+
+
 def _genre_buckets(rows: list[sqlite3.Row]) -> dict[str, list[sqlite3.Row]]:
     buckets: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
         buckets.setdefault(bucket_for_track(row), []).append(row)
-    return {bucket: sorted(items, key=lambda row: (row["energy_score"], row["normalized_artist_name"], row["normalized_track_name"])) for bucket, items in sorted(buckets.items())}
+    return {
+        bucket: sorted(items, key=lambda row: (-int(row["energy_score"]), row["normalized_artist_name"], row["normalized_track_name"]))
+        for bucket, items in sorted(buckets.items())
+    }
 
 
 def _vibe_for_rows(rows: list[sqlite3.Row]) -> str:
