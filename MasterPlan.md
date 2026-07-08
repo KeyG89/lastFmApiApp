@@ -14,7 +14,7 @@ Build the data foundation first, then use it for playlists, genre maps, and disc
 | 5 | Spotify Playlist Export | In Progress | [T.5-deployment-and-release-path.md](Items/T.5-deployment-and-release-path.md) | `[T.5]` |
 | 6 | Spotify Safety And Account Mirror | In Progress | [T.6-spotify-safety-and-account-mirror.md](Items/T.6-spotify-safety-and-account-mirror.md) | `[T.6]` |
 | 7 | Shazam Library Integration | In Progress | [T.7-shazam-library-integration.md](Items/T.7-shazam-library-integration.md) | `[T.7]` |
-| 8 | Current Music Discovery Expander | Open | [T.8-current-music-discovery-expander.md](Items/T.8-current-music-discovery-expander.md) | `[T.8]` |
+| 8 | Current Music Discovery Expander | In Progress | [T.8-current-music-discovery-expander.md](Items/T.8-current-music-discovery-expander.md) | `[T.8]` |
 | 9 | Drum Groove Study Playlists | In Progress | [T.9-drum-groove-study-playlists.md](Items/T.9-drum-groove-study-playlists.md) | `[T.9]` |
 
 ## AI Augmentations

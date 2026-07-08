@@ -1,6 +1,6 @@
 # T.8 Current Music Discovery Expander
 
-Status: Open
+Status: In Progress
 Commit Prefix: `[T.8]`
 
 ## Goal
@@ -21,19 +21,23 @@ Use Last.fm/Spotify local data for exclusions and identity matching. Use web res
 
 ## Development Notes
 
-No implementation yet.
+- 2026-07-08: Created five current/acclaimed discovery playlists for Electronic, EDM, House, Rock, and Various Songs. The exact `artist - title` pairs were checked against the local Last.fm database before Spotify export. Research notes and source links are recorded in `Docs/DiscoveryBangers2026-07-08.md`.
 
 ## Validation
 
-Not run yet.
+- 2026-07-08: Verified zero local scrobbles for the final 50 exact `artist - title` candidates before export.
+- 2026-07-08: Spotify dry-runs matched 50/50 tracks.
+- 2026-07-08: Spotify exports created five private playlists and added 50/50 tracks.
 
 ## User Test Instructions
 
-To be written after implementation.
+1. Open the playlist links in `Docs/DiscoveryBangers2026-07-08.md`.
+2. Listen and record feedback by playlist and track: keep, meh, wrong vibe, too obvious, too obscure, already known elsewhere, or strong discovery.
+3. Use the feedback to tighten the next recommendation pass.
 
 ## Feedback And Fix History
 
-No feedback yet.
+- Awaiting user listening feedback for the 2026-07-08 discovery playlists.
 
 ## Closure Notes
 
