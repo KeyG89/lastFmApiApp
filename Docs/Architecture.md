@@ -11,6 +11,9 @@ The app is a local data pipeline with a thin CLI:
 - `src/lastfm_app/reports.py`: local summaries used as the first playlist intelligence layer.
 - `src/lastfm_app/spotify.py`: Spotify PKCE auth, playlist creation, account mirror tables, safety confirmations, and rate-limit handling.
 - `src/lastfm_app/shazam.py`: dedicated Shazam SQLite database, Shazam web CSV import, Last.fm/Spotify linking, and generated playlist plans.
+- `.agents/skills/lastfm-spotify-operator/`: canonical cross-agent setup and operational guidance.
+- `Docs/AgentOperations.md`: model-neutral discovery and handoff map for developers and coding agents.
+- `Diagnostics/integration_doctor.py`: credential-safe readiness checks for local integrations and agent entrypoints.
 
 Generated databases live under `data/` by default and are ignored by git. Secrets live in `.env`, never in tracked files.
 

@@ -4,6 +4,23 @@ Python CLI + SQLite app that safely imports a user's full Last.fm listening hist
 
 This repository was created with `project-builder-flow` and follows its standard structure: `MasterPlan.md` is the source of truth, `Items/` holds item-level plans and execution notes, `Docs/` holds durable documentation, `Tutorial/` provides the developer tutorial website, and `Diagnostics/` contains readiness checks.
 
+## Developer And Agent Handoff
+
+Start with [AGENTS.md](AGENTS.md) and [Docs/AgentOperations.md](Docs/AgentOperations.md). The canonical project skill is [`.agents/skills/lastfm-spotify-operator/SKILL.md`](.agents/skills/lastfm-spotify-operator/SKILL.md); it contains routed setup and operations references for Last.fm, Spotify, Shazam, SQLite, reports, and playlist workflows.
+
+- Codex discovers the canonical skill under `.agents/skills/`.
+- Claude Code loads `CLAUDE.md` and the adapter under `.claude/skills/`.
+- Gemini CLI loads `GEMINI.md`.
+- GitHub Copilot loads `.github/copilot-instructions.md` in supported clients.
+- Other coding agents can read `AGENTS.md` and the canonical skill directly.
+
+Validate a handoff without displaying credential values:
+
+```bash
+.venv/bin/python Diagnostics/integration_doctor.py .
+bash Diagnostics/check.sh
+```
+
 ## Quick Start
 
 ```bash
@@ -12,21 +29,21 @@ python3 -m venv .venv
 cp .env.example .env
 ```
 
-Fill `LASTFM_API_KEY`, `LASTFM_SHARED_SECRET`, and `LASTFM_USERNAME` in `.env`.
+Fill `LASTFM_API_KEY` and `LASTFM_USERNAME` in `.env`. `LASTFM_SHARED_SECRET` is optional for the current read-only Last.fm methods.
 
 ```bash
-lastfm-app init-db
-lastfm-app import-history --full
-lastfm-app enrich --artists --limit 100
-lastfm-app enrich --tracks --limit 250
-lastfm-app report favorites --limit 30
-lastfm-app report genres --limit 30
+.venv/bin/lastfm-app init-db
+.venv/bin/lastfm-app import-history --full
+.venv/bin/lastfm-app enrich --artists --limit 100
+.venv/bin/lastfm-app enrich --tracks --limit 250
+.venv/bin/lastfm-app report favorites --limit 30
+.venv/bin/lastfm-app report genres --limit 30
 ```
 
 For a safe smoke import:
 
 ```bash
-lastfm-app import-history --max-pages 1
+.venv/bin/lastfm-app import-history --max-pages 1
 ```
 
 ## Spotify Export
@@ -44,6 +61,7 @@ SPOTIFY_CLIENT_ID=
 SPOTIFY_REDIRECT_URI=http://127.0.0.1:8765/callback
 SPOTIFY_TOKEN_PATH=data/spotify_token.json
 SPOTIFY_MARKET=PL
+SPOTIFY_MAX_RATE_LIMIT_SLEEP_SECONDS=15
 ```
 
 Authorize once:
@@ -82,13 +100,15 @@ Mirror Spotify playlists into SQLite:
 
 Safety rule: playlists created by this app on or after `2026-05-31` are editable by the app. Synced playlists with unknown creation dates are treated as protected. Rename/unfollow/delete-style operations on protected playlists require an exact `--confirm` phrase printed by the CLI.
 
+The CLI uses Spotify Authorization Code with PKCE, so it needs the client ID but no client secret. See the skill's [setup reference](.agents/skills/lastfm-spotify-operator/references/setup.md) for current dashboard, redirect URI, scope, and troubleshooting details.
+
 ## Shazam Library
 
 Shazam data is stored in a separate local SQLite database, `data/shazam.sqlite3` by default. The supported source is the CSV downloaded from Shazam on the web. The import preserves Shazam `TrackKey`, normalized artist/title keys, the Shazam URL, tag time, and raw source rows so the data can later be matched against Last.fm, Spotify, or web research. Linked Shazam tracks can be enriched with local Last.fm tags for genre and energy grouping.
 
 ```bash
 .venv/bin/lastfm-app shazam init
-.venv/bin/lastfm-app shazam import /Users/krzysztofgoscinski/Downloads/shazamlibrary.csv --link-lastfm
+.venv/bin/lastfm-app shazam import <path-to-shazam.csv> --link-lastfm
 .venv/bin/lastfm-app shazam enrich-lastfm
 .venv/bin/lastfm-app shazam status
 ```
@@ -116,8 +136,10 @@ Python 3.11+, stdlib HTTP client, SQLite, pytest. The app uses the official Last
 ## Data Safety
 
 - `.env` and local databases are ignored by git.
+- Spotify access/refresh tokens stay in the ignored `data/spotify_token.json` cache.
 - Imports are paginated and resumable through SQLite deduplication and cached API responses.
 - Metadata enrichment is deliberately conservative; start with `--limit` before enriching everything.
+- Spotify playlist creation defaults to private; analysis or planning does not authorize remote writes.
 
 ## Workflow
 
@@ -126,6 +148,8 @@ Python 3.11+, stdlib HTTP client, SQLite, pytest. The app uses the official Last
 3. Implement, test, update docs/tutorial, and record validation.
 4. Commit with `[T.<id>] <item title>`.
 5. Run `bash Diagnostics/check.sh` before closing larger items.
+
+For operational work, use the `lastfm-spotify-operator` skill and keep its setup/operations references synchronized with CLI changes.
 
 ## Workflow Improvements
 

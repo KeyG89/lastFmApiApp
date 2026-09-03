@@ -18,6 +18,15 @@ https://github.com/KeyG89/project-builder-flow
 - Keep docs, diagnostics, and the developer tutorial updated when behavior changes.
 - Keep secrets out of git; use `.env.example`.
 
+## Music Data Operations
+
+- For Last.fm, Spotify, Shazam, database, report, or playlist work, read `.agents/skills/lastfm-spotify-operator/SKILL.md` and the reference it selects before acting.
+- Use `Docs/AgentOperations.md` as the model-neutral onboarding map.
+- Never print, commit, or request the contents of `.env`, Spotify token files, or local databases.
+- Analysis and planning do not authorize remote Spotify writes. Default new playlists to private and use dry-run or limited modes first.
+- Preserve the Spotify account mirror and protected-playlist confirmation policy; do not bypass it with direct API or SQL changes.
+- Run `.venv/bin/python Diagnostics/integration_doctor.py .` for connection readiness and `bash Diagnostics/check.sh` before closing operational changes.
+
 ## Auto-Improvement Contract
 
 When the user points to something in this project that should improve future projects, do not treat it as a one-off local tweak. Treat it as a `project-builder-flow` improvement candidate.

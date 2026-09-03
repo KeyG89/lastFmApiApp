@@ -1,0 +1,4 @@
+interface:
+  display_name: "Last.fm + Spotify Operator"
+  short_description: "Safely operate the local music data pipeline"
+  default_prompt: "Use $lastfm-spotify-operator to set up or safely operate this repository's music data workflow."

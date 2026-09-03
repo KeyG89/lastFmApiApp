@@ -26,6 +26,10 @@ if [ -f Diagnostics/project_doctor.py ]; then
   "$PYTHON_BIN" Diagnostics/project_doctor.py .
 fi
 
+if [ -f Diagnostics/integration_doctor.py ]; then
+  "$PYTHON_BIN" Diagnostics/integration_doctor.py .
+fi
+
 PYTHONPATH=src "$PYTHON_BIN" Diagnostics/lastfm_doctor.py
 PYTHONPATH=src "$PYTHON_BIN" Diagnostics/shazam_doctor.py
 PYTHONPATH=src "$PYTHON_BIN" -m pytest -q

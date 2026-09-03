@@ -12,7 +12,9 @@
       <strong>Last.fm API App</strong>
       <a href="#overview">Overview</a>
       <a href="#architecture">Architecture</a>
+      <a href="#agents">Agents</a>
       <a href="#tutorial">Tutorial</a>
+      <a href="#spotify">Spotify</a>
       <a href="#shazam">Shazam</a>
       <a href="#quality">Quality</a>
       <a href="#improve">Improve</a>
@@ -70,6 +72,25 @@
       </div>
     </section>
 
+    <section class="band tutorial" id="agents">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Developer + agent handoff</p>
+          <h2>One operational source of truth across coding agents</h2>
+        </div>
+        <p>Codex, Claude Code, Gemini CLI, GitHub Copilot, and other capable agents are routed to the same repository skill and safety rules.</p>
+      </div>
+      <div class="tutorial-grid">
+        <div class="command-card"><h3>1. Read context</h3><pre><code>AGENTS.md
+Docs/AgentOperations.md
+.agents/skills/lastfm-spotify-operator/SKILL.md</code></pre></div>
+        <div class="command-card"><h3>2. Check readiness</h3><pre><code>.venv/bin/python Diagnostics/integration_doctor.py .
+bash Diagnostics/check.sh</code></pre></div>
+        <div class="command-card"><h3>3. Select a runbook</h3><pre><code>references/setup.md
+references/operations.md</code></pre><p>Load only the reference needed for setup or data operations.</p></div>
+      </div>
+    </section>
+
     <section class="band tutorial" id="tutorial">
       <div class="section-head">
         <div>
@@ -90,6 +111,22 @@ bash Diagnostics/check.sh</code></pre></div>
       </div>
     </section>
 
+    <section class="band tutorial" id="spotify">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Spotify safety path</p>
+          <h2>Authorize, mirror, dry-run, then create</h2>
+        </div>
+        <p>PKCE keeps the client secret out of the repository. New playlists default to private, while unknown and older playlists remain protected.</p>
+      </div>
+      <div class="tutorial-grid">
+        <div class="command-card"><h3>1. Authorize</h3><pre><code>.venv/bin/lastfm-app spotify auth</code></pre><p>Register <code>http://127.0.0.1:8765/callback</code> in the Spotify app first.</p></div>
+        <div class="command-card"><h3>2. Mirror</h3><pre><code>.venv/bin/lastfm-app spotify sync --limit 10 --delay 3
+.venv/bin/lastfm-app spotify playlists</code></pre></div>
+        <div class="command-card"><h3>3. Dry-run</h3><pre><code>.venv/bin/lastfm-app spotify create --preset morning-rock-bangers --dry-run</code></pre><p>Remove <code>--dry-run</code> only after reviewing matches and authorizing the remote write.</p></div>
+      </div>
+    </section>
+
     <section class="band tutorial" id="shazam">
       <div class="section-head">
         <div>
@@ -101,10 +138,10 @@ bash Diagnostics/check.sh</code></pre></div>
       <div class="tutorial-grid">
         <div class="command-card"><h3>1. Initialize</h3><pre><code>.venv/bin/lastfm-app shazam init
 .venv/bin/lastfm-app shazam status</code></pre></div>
-        <div class="command-card"><h3>2. Import CSV</h3><pre><code>.venv/bin/lastfm-app shazam import /Users/krzysztofgoscinski/Downloads/shazamlibrary.csv --link-lastfm
+        <div class="command-card"><h3>2. Import CSV</h3><pre><code>.venv/bin/lastfm-app shazam import &lt;path-to-shazam.csv&gt; --link-lastfm
 .venv/bin/lastfm-app shazam enrich-lastfm</code></pre></div>
         <div class="command-card"><h3>3. Spotify</h3><pre><code>.venv/bin/lastfm-app shazam playlists --show
-.venv/bin/lastfm-app shazam export-spotify --show</code></pre></div>
+.venv/bin/lastfm-app shazam export-spotify --no-match --delay 10 --show</code></pre><p>The export command creates remote playlists and needs explicit authorization.</p></div>
       </div>
     </section>
 
