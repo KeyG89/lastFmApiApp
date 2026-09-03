@@ -16,7 +16,7 @@ Build the data foundation first, then use it for playlists, genre maps, and disc
 | 7 | Shazam Library Integration | In Progress | [T.7-shazam-library-integration.md](Items/T.7-shazam-library-integration.md) | `[T.7]` |
 | 8 | Current Music Discovery Expander | In Progress | [T.8-current-music-discovery-expander.md](Items/T.8-current-music-discovery-expander.md) | `[T.8]` |
 | 9 | Drum Groove Study Playlists | In Progress | [T.9-drum-groove-study-playlists.md](Items/T.9-drum-groove-study-playlists.md) | `[T.9]` |
-| 10 | Private GitHub Repository | In Progress | [T.10-private-github-repository.md](Items/T.10-private-github-repository.md) | `[T.10]` |
+| 10 | Private GitHub Repository | Done | [T.10-private-github-repository.md](Items/T.10-private-github-repository.md) | `[T.10]` |
 
 ## AI Augmentations
 
